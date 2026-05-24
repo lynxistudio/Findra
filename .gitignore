@@ -1,0 +1,19 @@
+# Compiled binary
+FastFinder
+!FastFinder/
+
+# macOS
+.DS_Store
+*.app
+*.dmg
+*.zip
+
+# IDE
+.vscode/
+.idea/
+
+# Build artifacts
+build/
+*.o
+*.swiftdoc
+*.swiftmodule
