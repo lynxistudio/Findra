@@ -4,10 +4,10 @@
 
 FastFinder is a native macOS file search engine built for speed. It indexes millions of files across local drives and network storage (NAS, NFS, SMB) using SQLite with FTS5 full-text search, delivers results in milliseconds, and stays up-to-date via FSEvents real-time monitoring.
 
+[![Download](https://img.shields.io/badge/download-v2.0-brightgreen)](https://github.com/lynxistudio/FastFinder/releases/latest)
 [![macOS](https://img.shields.io/badge/macOS-14.0%2B-blue)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-5.10-orange)](https://swift.org)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Release](https://img.shields.io/badge/release-v2.0-brightgreen)](https://github.com/lynxistudio/FastFinder/releases)
 
 ---
 
