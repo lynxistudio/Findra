@@ -4,7 +4,7 @@
 
 FastFinder is a native macOS file search engine built for speed. It indexes millions of files across local drives and network storage (NAS, NFS, SMB) using SQLite with FTS5 full-text search, delivers results in milliseconds, and stays up-to-date via FSEvents real-time monitoring.
 
-[![Download](https://img.shields.io/badge/download-v2.0-brightgreen)](https://github.com/lynxistudio/FastFinder/releases/latest)
+[![Download](https://img.shields.io/badge/download-v2.0.1-brightgreen)](https://github.com/lynxistudio/FastFinder/releases/latest)
 [![macOS](https://img.shields.io/badge/macOS-14.0%2B-blue)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-5.10-orange)](https://swift.org)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -104,7 +104,7 @@ FastFinder gives you **total control** over what gets indexed, uses a lightweigh
 ### Option 1: Download Pre-built App (Recommended)
 
 1. Go to the [Releases page](https://github.com/lynxistudio/FastFinder/releases)
-2. Download `FastFinder_v2.0.zip` from the latest release
+2. Download `FastFinder_v2.0.1.zip` from the latest release
 3. Unzip and drag `FastFinder.app` to your `/Applications` folder
 4. On first launch, **right-click the app → Open** (or go to System Settings → Privacy & Security → Allow)
 
