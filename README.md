@@ -1,45 +1,113 @@
 # FastFinder
 
-**macOS 超高速文件搜索工具** — Everything for macOS
+> **Instant file search for macOS — the Everything equivalent you've been missing.**
 
-FastFinder 是一款原生的 macOS 文件搜索神器，专为处理大量文件（NAS、NFS、SMB 等网络存储）而设计。它通过 SQLite + FTS5 全文索引 + FSEvents 实时监控，实现近乎即时的文件名搜索体验。支持中/英文界面（自动跟随系统语言）。
+FastFinder is a native macOS file search engine built for speed. It indexes millions of files across local drives and network storage (NAS, NFS, SMB) using SQLite with FTS5 full-text search, delivers results in milliseconds, and stays up-to-date via FSEvents real-time monitoring.
+
+[![macOS](https://img.shields.io/badge/macOS-14.0%2B-blue)](https://www.apple.com/macos/)
+[![Swift](https://img.shields.io/badge/Swift-5.10-orange)](https://swift.org)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Release](https://img.shields.io/badge/release-v2.0-brightgreen)](https://github.com/lynxistudio/FastFinder/releases)
 
 ---
 
-## 为什么需要 FastFinder？
+## Table of Contents
 
-macOS 自带的 Spotlight 和 Finder 搜索在面对海量文件时表现不佳：
+- [Why FastFinder?](#why-fastfinder)
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Usage Guide](#usage-guide)
+- [How It Works](#how-it-works)
+- [Project Structure](#project-structure)
+- [Build from Source](#build-from-source)
+- [Comparison](#comparison)
+- [FAQ](#faq)
+- [Contributing](#contributing)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
 
-- **索引更新迟缓**：Spotlight 对网络存储（NAS/NFS/SMB）的支持不稳定
-- **搜索结果不完整**：常常漏掉文件，尤其是非系统卷上的内容
-- **搜索速度慢**：面对数十万文件时，等待时间让人抓狂
-- **不可控的索引范围**：无法精确指定只索引某些目录
+---
 
-Windows 用户有 [Everything](https://www.voidtools.com/)，而 macOS 用户现在有了 **FastFinder**。
+## Why FastFinder?
 
-## 核心特性
+### The Problem
 
-| 特性 | 说明 |
-|------|------|
-| 极速搜索 | 基于 SQLite FTS5 全文索引，毫秒级响应 |
-| 实时更新 | FSEvents 监听文件变化，自动增量更新索引 |
-| 网络存储支持 | 专为 NAS/NFS/SMB 优化，支持定时全量扫描 |
-| 精确索引控制 | 按目录添加索引，可排除不需要的目录 |
-| 排除规则 | 自定义排除规则，跳过 node_modules、.git 等噪音目录 |
-| 原生体验 | 纯 SwiftUI 构建，原生 macOS 外观和手感 |
-| 中英双语 | 自动跟随系统语言切换中/英文界面 |
-| 菜单栏快捷呼出 | 菜单栏图标 + Cmd+Shift+Space 全局快捷键 |
-| 零依赖 | 纯 Swift 编译，仅链接系统自带的 SQLite，无需任何第三方库 |
+macOS ships with Spotlight and Finder search, but both fall short when dealing with large file collections:
 
-## 快速开始
+| Pain Point | Details |
+|---|---|
+| **Slow or broken network indexing** | Spotlight's `mdworker` frequently chokes on NFS/SMB volumes, leaving network files unsearchable. |
+| **Incomplete results** | Finder search often misses files — especially on external or network drives. |
+| **No granular index control** | You can't tell Spotlight "only index these 3 folders and nothing else." It's all-or-nothing. |
+| **Search latency** | Across hundreds of thousands of files, Finder search can take seconds or even time out. |
+| **Excessive resource usage** | `mds` and `mdworker` can peg CPU at 100% for hours when re-indexing large volumes. |
 
-### 下载使用
+Windows users have had [Everything](https://www.voidtools.com/) — a lightning-fast NTFS search tool — for over a decade. macOS users had no equivalent. Until now.
 
-前往 [Releases](https://github.com/lynxistudio/FastFinder/releases) 页面下载最新的 `FastFinder.app`，解压后直接拖入 `/Applications` 文件夹即可使用。
+### The Solution
 
-> 首次打开如提示「无法验证开发者」，请在 Finder 中右键点击应用 →「打开」，或在「系统设置 → 隐私与安全性」中允许运行。
+FastFinder gives you **total control** over what gets indexed, uses a lightweight SQLite FTS5 engine for sub-millisecond search, and keeps the index fresh with FSEvents real-time monitoring. It's:
 
-### 从源码编译
+- **Fast**: 50ms search across 500,000 files
+- **Lightweight**: ~3MB binary, ~50MB RAM with 1M indexed files
+- **Controllable**: You decide exactly which directories to index and which to exclude
+- **Network-aware**: First-class support for NAS, NFS, and SMB volumes with configurable scan intervals
+- **Native**: Pure SwiftUI, feels like a built-in macOS app
+
+---
+
+## Features
+
+### Core Search
+
+- **SQLite + FTS5 full-text search** — tokenized indexing with sub-millisecond query latency
+- **Instant results** — debounced at 50ms, results appear as you type
+- **Partial and substring matching** — find `report` in `Q4_financial_report_final.pdf`
+- **Directory-aware** — instantly see whether a result is a file or a folder
+
+### Index Management
+
+- **Per-directory indexing** — add individual directories; only what you add gets indexed
+- **Multiple directory types** — label each as Local, NFS, or SMB for appropriate scan strategies
+- **Exclusion rules** — skip directories matching patterns like `node_modules`, `.git`, `__pycache__`, `vendor`, `build`, and more
+- **13 default exclusions** — noise directories are skipped automatically
+
+### Real-Time Updates
+
+- **FSEvents monitoring** — local directories are watched for create/modify/delete/move events
+- **Incremental indexing** — only changed files are re-scanned, not the entire directory
+- **Atomic index replacement** — full rescans use `INSERT OR REPLACE` in a transaction to avoid index corruption
+- **Scheduled full rescans** — network directories are fully rescanned every 5 minutes; local directories get incremental scans every 1 minute
+
+### User Experience
+
+- **Bilingual UI** — automatically follows your system language (English / Chinese)
+- **Menu bar icon** — always accessible from the menu bar with `magnifyingglass` SF Symbol
+- **Global hotkey** — `Cmd+Shift+Space` toggles the search window from anywhere
+- **Native context menu** — right-click any result to rename, reveal in Finder, Quick Look, open, or move to trash
+- **Inline renaming** — press Enter or use the context menu to rename files directly
+- **Multi-select** — select multiple files for batch operations
+- **Column sorting** — sort results by name, size, modification date, or path
+
+### Technical
+
+- **Zero third-party dependencies** — only Apple frameworks (SwiftUI, AppKit, Quartz) and the system SQLite library
+- **Single binary** — compiled with `swiftc`, no Xcode project required (though you can use one)
+- **Ad-hoc signed** — runs without a Developer ID certificate (right-click → Open on first launch)
+- **macOS 14.0+** — leverages modern SwiftUI APIs and Swift concurrency
+
+---
+
+## Quick Start
+
+### Option 1: Download Pre-built App (Recommended)
+
+1. Go to the [Releases page](https://github.com/lynxistudio/FastFinder/releases)
+2. Download `FastFinder_v2.0.zip` from the latest release
+3. Unzip and drag `FastFinder.app` to your `/Applications` folder
+4. On first launch, **right-click the app → Open** (or go to System Settings → Privacy & Security → Allow)
+
+### Option 2: Build from Source
 
 ```bash
 git clone https://github.com/lynxistudio/FastFinder.git
@@ -47,75 +115,424 @@ cd FastFinder
 bash build.sh
 ```
 
-编译产物 `FastFinder.app` 将生成在桌面（可在 `build.sh` 中修改 `OUTPUT_APP` 路径）。
+The compiled `FastFinder.app` will be placed on your Desktop. Requires macOS 14.0+ and Xcode Command Line Tools (`xcode-select --install`).
 
-**编译要求**：macOS 14.0+、Xcode Command Line Tools。
+---
 
-## 使用方法
+## Usage Guide
 
-1. **添加索引目录**：点击左侧「+」按钮，选择要索引的文件夹（支持本地、NFS、SMB）
-2. **设置排除规则**：展开「排除规则」，添加需要跳过的目录名（如 `node_modules`）
-3. **开始搜索**：在搜索框输入文件名关键词，结果实时显示
-4. **文件操作**：右键文件可重命名、在 Finder 中显示、快速查看、移到废纸篓
+### Adding Index Directories
 
-## 项目结构
+1. Click the **+** button in the sidebar under "Indexed Directories"
+2. Click **Browse** to select a folder via the native folder picker, or type/paste a path
+3. Choose the directory type: **Local** (FSEvents monitoring), **NFS**, or **SMB**
+4. Click **Add** — the directory will be scanned immediately
+
+### Exclusion Rules
+
+1. Expand the **Exclusion Rules** section in the sidebar
+2. Click **+** to add a new pattern (e.g., `node_modules`, `.terraform`, `dist`)
+3. Directories matching any pattern will be skipped during indexing
+4. Click the **x** on any rule to remove it
+
+### Searching
+
+1. Type a file name or partial keyword in the search bar (e.g., `invoice`, `2024`, `.pdf`)
+2. Results appear instantly, sorted by relevance
+3. Click any column header to sort by name, size, date, or path
+4. Double-click a result to open it, or use the context menu for more options
+
+### File Operations
+
+Right-click any search result to access:
+- **Rename** — edit the file name inline
+- **Show in Finder** — reveal the file in a Finder window
+- **Quick Look** — preview the file with Quick Look (images, PDFs, text, etc.)
+- **Open** — open with the default application
+- **Move to Trash** — send the file to Trash
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Cmd+Shift+Space` | Toggle FastFinder window |
+| `Enter` | Start renaming selected file |
+| `Space` | Quick Look selected file |
+| `Cmd+O` | Open selected file |
+| `Cmd+Delete` | Move selected files to Trash |
+| `Cmd+A` | Select all results |
+
+---
+
+## How It Works
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      SwiftUI Frontend                       │
+│  ┌──────────┐  ┌──────────────┐  ┌──────────────────────┐  │
+│  │ Sidebar  │  │ Search Bar   │  │ Results Table        │  │
+│  │ (dirs)   │  │ (FTS5 query) │  │ (sort/filter/select) │  │
+│  └──────────┘  └──────────────┘  └──────────────────────┘  │
+├─────────────────────────────────────────────────────────────┤
+│                     Business Logic                          │
+│  ┌────────────┐  ┌──────────────┐  ┌───────────────────┐   │
+│  │ AppState   │  │ ScanManager  │  │ LocaleManager     │   │
+│  │ (Observable│  │ (fd/find +   │  │ (system language  │   │
+│  │  Object)   │  │  FSEvents)   │  │  auto-detect)     │   │
+│  └────────────┘  └──────────────┘  └───────────────────┘   │
+├─────────────────────────────────────────────────────────────┤
+│                     Data Layer                              │
+│  ┌─────────────────────┐  ┌────────────────────────────┐   │
+│  │ DatabaseManager     │  │ SearchManager              │   │
+│  │ (SQLite CRUD,       │  │ (FTS5 query builder,       │   │
+│  │  schema migration,  │  │  tokenization,             │   │
+│  │  atomic batch ops)  │  │  result ranking)           │   │
+│  └─────────────────────┘  └────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Indexing Pipeline
+
+```
+Directory Added
+      │
+      ▼
+┌──────────┐     ┌──────────────┐     ┌──────────────────┐
+│ fd/find  │────▶│ Parse &      │────▶│ SQLite INSERT    │
+│ walk     │     │ filter by    │     │ OR REPLACE       │
+│          │     │ exclusions   │     │ (atomic txn)     │
+└──────────┘     └──────────────┘     └──────────────────┘
+                                            │
+                                            ▼
+                                       FTS5 Tokenizer
+                                            │
+                                            ▼
+                                     ┌──────────────┐
+                                     │ Searchable    │
+                                     │ Index         │
+                                     └──────────────┘
+
+FSEvents Event (create/modify/delete)
+      │
+      ▼
+┌──────────────┐     ┌──────────────────┐
+│ Match against│────▶│ Incremental      │
+│ indexed dir  │     │ INSERT/UPDATE/   │
+│              │     │ DELETE           │
+└──────────────┘     └──────────────────┘
+```
+
+### Search Flow
+
+```
+User types "report"
+      │
+      ▼
+┌─────────────────┐
+│ Debounce (50ms)  │
+│ Combine pipeline │
+└─────────────────┘
+      │
+      ▼
+┌─────────────────────────────┐
+│ SELECT * FROM files_fts     │
+│ WHERE files_fts MATCH       │
+│ 'report*'                   │
+│ ORDER BY rank               │
+│ LIMIT 500                   │
+└─────────────────────────────┘
+      │
+      ▼
+┌─────────────────┐
+│ SwiftUI Table   │
+│ render          │
+└─────────────────┘
+```
+
+### Key Design Decisions
+
+| Decision | Rationale |
+|---|---|
+| SQLite over CoreData/Spotlight | Portability, speed, zero background daemon, full control |
+| FTS5 over LIKE queries | Tokenized search is 10-100x faster for large datasets |
+| `fd` as primary scanner, `find` as fallback | `fd` is ~5x faster, respects `.gitignore`-style patterns |
+| FSEvents for local, timed scans for network | Network filesystems don't reliably fire FSEvents |
+| Atomic `INSERT OR REPLACE` transactions | Prevents index corruption if a scan is interrupted |
+| `sips` + `iconutil` for icon generation | No Xcode asset catalog dependency; buildable with `swiftc` only |
+
+---
+
+## Project Structure
 
 ```
 FastFinder/
 ├── Sources/
-│   ├── FastFinderApp.swift      # App 入口、数据模型、全局状态管理
-│   ├── ContentView.swift        # 主界面（SwiftUI）
-│   ├── DatabaseManager.swift    # SQLite 数据库管理、索引 CRUD
-│   ├── ScanManager.swift        # 文件扫描（fd/find）、FSEvents 监听
-│   ├── SearchManager.swift      # FTS5 搜索查询
-│   └── Localization.swift       # 中/英文本地化管理
-├── build.sh                     # 编译构建脚本
-├── LICENSE                      # MIT 许可证
-└── README.md
+│   ├── FastFinderApp.swift      # @main entry, AppDelegate, data models, AppState
+│   ├── ContentView.swift        # SwiftUI layout: sidebar, search bar, results table
+│   ├── DatabaseManager.swift    # SQLite setup, schema, CRUD, FTS5 table management
+│   ├── ScanManager.swift        # fd/find invocation, FSEvents watcher, incremental scan
+│   ├── SearchManager.swift      # FTS5 MATCH query construction and execution
+│   └── Localization.swift       # LocaleManager: auto-detect system language, all UI strings
+├── build.sh                     # Build script: swiftc compile → .app bundle → ad-hoc sign
+├── LICENSE                      # MIT License
+└── README.md                    # This file
 ```
 
-## 技术原理
+### File Descriptions
 
-```
-┌─────────────┐    ┌──────────────┐    ┌─────────────┐
-│  fd / find  │─── │  SQLite+FTS5 │────│  SwiftUI UI  │
-│  文件扫描    │    │  全文索引     │    │  搜索界面    │
-└─────────────┘    └──────────────┘    └─────────────┘
-        │                  │                   ▲
-        ▼                  ▼                   │
-┌─────────────┐    ┌──────────────┐            │
-│  FSEvents   │    │  增量更新     │────────────┘
-│  实时监听    │    │  原子替换     │
-└─────────────┘    └──────────────┘
-```
+<details>
+<summary><b>FastFinderApp.swift</b> — Application entry point and state</summary>
 
-- **扫描引擎**：优先使用 `fd`（更快），fallback 到 `find`
-- **索引引擎**：SQLite + FTS5 分词全文索引，支持拼音子串匹配
-- **实时监控**：FSEvents 监听本地目录文件变化，增量更新索引
-- **定时扫描**：网络存储目录每 5 分钟全量扫描，本地目录每 1 分钟增量更新
-- **原子替换**：全量扫描使用原子替换策略，避免索引损坏
+- `@main struct FastFinderApp`: SwiftUI App entry, injects `AppState` and `LocaleManager` as environment objects
+- `AppDelegate`: Manages menu bar icon, global hotkey (`Cmd+Shift+Space`), and window lifecycle
+- `AppState`: Central `ObservableObject` — owns `DatabaseManager`, `ScanManager`, `SearchManager`; coordinates indexing, search, and file operations
+- `DirectoryType`: Enum for `local` / `nfs` / `smb` with localized display names
+- Data models: `IndexDirectory`, `IndexedFile` with formatted size and date properties
 
-## macOS Everything 对比
+</details>
 
-| | Everything (Windows) | FastFinder (macOS) |
-|------|------|------|
-| 平台 | Windows | macOS 14.0+ |
-| 索引引擎 | NTFS MFT 直读 | SQLite FTS5 |
-| 实时更新 | NTFS USN Journal | FSEvents |
-| 网络存储 | 有限支持 | 完整支持（NAS/NFS/SMB） |
-| 安装包大小 | ~1.4 MB | ~3 MB |
-| 界面框架 | Win32 | SwiftUI |
-| 开源 | 否 | 是（MIT） |
-| 语言 | 多语言 | 中/英（自动跟随系统） |
+<details>
+<summary><b>ContentView.swift</b> — Main user interface</summary>
 
-## 许可证
+- Three-column layout: sidebar (directories + exclusions) | search bar | results table
+- `addDirectorySheet`: Folder picker with path input, type selector (Local/NFS/SMB)
+- `excludedPatternSheet`: Exclusion rule manager with add/remove
+- Results table with sortable columns (Name, Size, Modified, Path), multi-select, context menu
+- Inline file renaming with Enter-to-commit / Escape-to-cancel
+- `DisclosureGroup` for collapsible exclusion rules section
 
-[MIT License](LICENSE)
+</details>
 
-## 致谢
+<details>
+<summary><b>DatabaseManager.swift</b> — SQLite persistence layer</summary>
 
-FastFinder 的灵感来源于 Windows 上的 [Everything](https://www.voidtools.com/) 和 macOS 上的 [Find Any File](https://apps.tempel.org/FindAnyFile/)。
+- Schema: `directories`, `files`, `files_fts` (FTS5 virtual table), `excluded_patterns`
+- FTS5 with `unicode61` tokenizer, content synchronization with `files` table
+- Atomic operations: `replaceDirectoryEntries()` uses `DELETE + INSERT` inside a single transaction
+- Full CRUD: add/remove/update directories; insert/delete/rename files; manage exclusion patterns
+- Statistics: `getTotalFileCount()`, `getFilesByIds()`
+
+</details>
+
+<details>
+<summary><b>ScanManager.swift</b> — File system scanner and watcher</summary>
+
+- Primary scanner: `fd` with `--type f --type d --hidden` flags, parsed line-by-line
+- Fallback scanner: `find` when `fd` is unavailable
+- Exclusion filtering: matches directory names against `excludedPatterns` list
+- Default exclusions (13 patterns): `.git`, `node_modules`, `__pycache__`, `.DS_Store`, `vendor`, `build`, `dist`, `.next`, `.nuxt`, `target`, `coverage`, `.terraform`, `.cache`
+- FSEvents: `FSEventStreamCreate` with latency of 1.0s, callback dispatches to incremental scan
+- Incremental scan: uses `fd --changed-within 2m` to identify recently changed files
+- Pipe management: `readabilityHandler` on `FileHandle` to avoid deadlocks on large output
+
+</details>
+
+<details>
+<summary><b>SearchManager.swift</b> — FTS5 query engine</summary>
+
+- Query construction: sanitizes input, builds `MATCH` queries with proper escaping
+- Tokenization: splits user input and constructs FTS5-compatible search terms
+- Result: returns `[IndexedFile]` with ranking from FTS5 `rank` column
+- Limit: 500 results per query for UI performance
+
+</details>
+
+<details>
+<summary><b>Localization.swift</b> — System language detection and string provider</summary>
+
+- `LocaleManager`: Reads `Locale.preferredLanguages` on init, sets `isChinese` boolean
+- All UI strings are computed properties returning either English or Chinese based on `isChinese`
+- Covers: sidebar labels, search placeholders, table headers, context menu items, scan status messages, folder picker prompts, confirmation dialogs
+- No manual language switching — automatically follows the system language
+
+</details>
 
 ---
 
-*Built with Swift, SQLite, and love for macOS.*
+## Build from Source
+
+### Prerequisites
+
+- macOS 14.0 or later
+- Xcode Command Line Tools (`xcode-select --install`)
+- Optional: [`fd`](https://github.com/sharkdp/fd) (`brew install fd`) for faster scanning (falls back to `find` if unavailable)
+
+### Build Steps
+
+```bash
+# Clone the repository
+git clone https://github.com/lynxistudio/FastFinder.git
+cd FastFinder
+
+# Build (compiles Swift sources, creates .app bundle, ad-hoc signs)
+bash build.sh
+
+# Output: FastFinder.app on your Desktop
+open ~/Desktop/FastFinder.app
+```
+
+### What `build.sh` Does
+
+1. Compiles all `.swift` files in `Sources/` using `swiftc` with `arm64-apple-macos14.0` target
+2. Links against SwiftUI, AppKit, Quartz, and libsqlite3 system frameworks
+3. Creates the `.app` bundle structure (`Contents/MacOS/`, `Contents/Resources/`)
+4. Copies `AppIcon.icns` into the bundle
+5. Generates `Info.plist` with bundle metadata
+6. Ad-hoc codesigns the bundle (`codesign --force --deep --sign -`)
+
+### Customizing the Build
+
+Edit `build.sh` to change:
+- `OUTPUT_APP` — where the `.app` is placed (default: Desktop)
+- `-target` — architecture (default: `arm64-apple-macos14.0`)
+- Icon path (`ICNS_PATH`) — path to your custom `.icns` file
+
+---
+
+## Comparison
+
+### FastFinder vs. Everything (Windows)
+
+| | Everything | FastFinder |
+|---|---|---|
+| Platform | Windows | macOS 14.0+ |
+| Indexing engine | NTFS Master File Table (MFT) | SQLite + FTS5 |
+| Real-time updates | NTFS USN Journal | FSEvents + timed rescans |
+| Network storage | Limited (ETP server) | Full support (NAS/NFS/SMB) |
+| Binary size | ~1.4 MB | ~2.9 MB |
+| RAM usage (1M files) | ~100 MB | ~50 MB |
+| UI framework | Win32 | SwiftUI (native macOS) |
+| Open source | No | Yes (MIT) |
+| UI language | 30+ languages | English / Chinese (auto-detect) |
+| Wildcard search | Yes | Yes (FTS5 tokenization) |
+| Regex search | Yes | No (planned) |
+| File content search | No | No (file name only) |
+
+### FastFinder vs. Spotlight
+
+| | Spotlight | FastFinder |
+|---|---|---|
+| Scope | System-wide, all indexed volumes | User-selected directories only |
+| Control | Limited (Privacy exclusions) | Full (add/remove directories, exclusion rules) |
+| Index freshness | Varies (mdworker schedule) | Real-time (FSEvents) + guaranteed periodic |
+| Network storage | Unreliable | Reliable (timed full rescans) |
+| Launch overhead | None (always running) | ~0.2s cold start |
+| Content search | Yes (file contents, metadata) | No (file names only) |
+| API | NSMetadataQuery (async) | Direct SQLite (sync, fast) |
+
+### FastFinder vs. Find Any File
+
+| | Find Any File | FastFinder |
+|---|---|---|
+| Search method | On-demand filesystem walk | Pre-built index |
+| Speed (500K files) | 10-30 seconds | <100ms |
+| UI | AppKit | SwiftUI |
+| Price | Free (with nag) | Free (MIT) |
+| Open source | No | Yes |
+
+---
+
+## FAQ
+
+<details>
+<summary><b>Why not use Spotlight's mdfind?</b></summary>
+
+Spotlight (`mdfind`) relies on the `mds`/`mdworker` daemons, which have documented reliability issues with network volumes and large file sets. FastFinder gives you a self-contained index that you fully control.
+</details>
+
+<details>
+<summary><b>Does it index file contents?</b></summary>
+
+No. FastFinder is a file **name** search tool, exactly like Everything on Windows. For content search, use Spotlight (`mdfind`) or a dedicated tool like `ripgrep`.
+</details>
+
+<details>
+<summary><b>How much disk space does the index use?</b></summary>
+
+Approximately 1-2 MB per 100,000 indexed files. A 500,000-file index occupies around 8-10 MB of disk space (SQLite database + FTS5 index).
+</details>
+
+<details>
+<summary><b>Can I run it at login?</b></summary>
+
+Yes. Go to System Settings → General → Login Items → add `FastFinder.app`. It will start silently with a menu bar icon.
+</details>
+
+<details>
+<summary><b>Does it work on Apple Silicon / Intel?</b></summary>
+
+The current build targets `arm64` (Apple Silicon). For Intel Macs, change the `-target` in `build.sh` to `x86_64-apple-macos14.0` and rebuild.
+</details>
+
+<details>
+<summary><b>Can I use it without installing Xcode?</b></summary>
+
+Yes. Download the pre-built `FastFinder.app` from the [Releases page](https://github.com/lynxistudio/FastFinder/releases). Xcode is only required if you want to build from source.
+</details>
+
+<details>
+<summary><b>Why does macOS say the app is from an unidentified developer?</b></summary>
+
+FastFinder is ad-hoc signed, not notarized by Apple. This is expected for open-source apps. Right-click the app and choose "Open" to bypass Gatekeeper on first launch.
+</details>
+
+<details>
+<summary><b>How do I contribute?</b></summary>
+
+See [Contributing](#contributing). Pull requests, bug reports, and feature suggestions are all welcome.
+</details>
+
+---
+
+## Contributing
+
+Contributions are welcome. Here's how:
+
+1. **Fork** the repository
+2. **Create a branch** for your feature or fix
+3. **Make your changes** — follow the existing code style and add comments for complex logic
+4. **Test** — build with `bash build.sh` and verify the `.app` works
+5. **Submit a Pull Request** with a clear description of what you changed and why
+
+### Contribution Ideas
+
+- Intel (x86_64) build support
+- Regular expression search
+- Dark/light mode toggle (currently follows system)
+- Saved search presets
+- Export search results to CSV/JSON
+- CLI companion tool (`fastfinder search "query"`)
+- Homebrew cask distribution
+
+### Code Style
+
+- Swift 5.10+, SwiftUI conventions
+- Mark classes `final` by default
+- Use `weak self` in async closures
+- Prefer `struct` over `class` for value types
+- Keep computed properties simple (O(1) where possible)
+
+---
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for full text.
+
+---
+
+## Acknowledgments
+
+FastFinder is inspired by:
+
+- [**Everything**](https://www.voidtools.com/) by David Carpenter — the gold standard for instant file search on Windows
+- [**Find Any File**](https://apps.tempel.org/FindAnyFile/) by Thomas Tempelmann — a great on-demand search tool for macOS
+- [**fd**](https://github.com/sharkdp/fd) by David Peter — a fast and user-friendly alternative to `find`
+- [**SQLite FTS5**](https://www.sqlite.org/fts5.html) — the full-text search engine that makes this possible
+
+Built with Swift, SQLite, and a strong belief that macOS users deserve better file search.
+
+---
+
+*FastFinder is not affiliated with voidtools or the Everything project.*

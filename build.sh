@@ -5,9 +5,9 @@ set -e
 # Compiles SwiftUI app and packages as .app bundle
 
 APP_NAME="FastFinder"
-BUILD_DIR="/Users/gray/Desktop/FastFinder_Sources"
+BUILD_DIR=$(dirname "$0")
 SRC_DIR="$BUILD_DIR/Sources"
-OUTPUT_APP="/Users/gray/Desktop/FastFinder.app"
+OUTPUT_APP="$HOME/Desktop/FastFinder.app"
 ICNS_PATH="$BUILD_DIR/AppIcon.icns"
 
 echo "=== FastFinder Build ==="
