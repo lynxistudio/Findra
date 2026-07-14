@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var showExcludedSheet = false
     @State private var newExcludedPattern = ""
     @State private var isExcludedExpanded = false
+    @State private var resultsKeyMonitor: Any?
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isRenameFocused: Bool
 
@@ -53,7 +54,11 @@ struct ContentView: View {
             }
             .frame(minWidth: 500)
         }
-        .onAppear { isSearchFocused = true }
+        .onAppear {
+            isSearchFocused = true
+            installResultsKeyMonitor()
+        }
+        .onDisappear { removeResultsKeyMonitor() }
         .onChange(of: appState.editingFileId) { _, newId in
             if newId != nil {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -413,9 +418,7 @@ struct ContentView: View {
             Button(locale.showInFinder) { appState.revealInFinder(files[0]) }
             Button(locale.quickLook) { quickLookFiles(files) }
             Divider()
-            Button(locale.open) {
-                NSWorkspace.shared.open(URL(fileURLWithPath: files[0].fullPath))
-            }
+            Button(locale.open) { openFiles(files) }
             Divider()
             Button(locale.moveToTrash, role: .destructive) { appState.deleteFiles(ids) }
         } else if !ids.isEmpty {
@@ -453,26 +456,76 @@ struct ContentView: View {
     }
 
     func quickLookSelected() {
-        let files = appState.dbManager.getFilesByIds(appState.selectedFiles)
-        quickLookFiles(files)
+        let files = availableFiles(from: appState.dbManager.getFilesByIds(appState.selectedFiles))
+        guard !files.isEmpty else { return }
+        QuickLookCoordinator.shared.togglePreview(
+            urls: files.map { URL(fileURLWithPath: $0.fullPath) }
+        )
     }
 
     func quickLookFiles(_ files: [IndexedFile]) {
+        let files = availableFiles(from: files)
         guard !files.isEmpty else { return }
-        QuickLookCoordinator.shared.previewURLs = files.map { URL(fileURLWithPath: $0.fullPath) }
-        if let panel = QLPreviewPanel.shared() {
-            panel.dataSource = QuickLookCoordinator.shared
-            panel.reloadData()
-            panel.currentPreviewItemIndex = 0
-            panel.makeKeyAndOrderFront(nil)
-        }
+        QuickLookCoordinator.shared.showPreview(
+            urls: files.map { URL(fileURLWithPath: $0.fullPath) }
+        )
     }
 
     func openSelectedFiles() {
-        let files = appState.dbManager.getFilesByIds(appState.selectedFiles)
-        for f in files {
-            NSWorkspace.shared.open(URL(fileURLWithPath: f.fullPath))
+        openFiles(appState.dbManager.getFilesByIds(appState.selectedFiles))
+    }
+
+    func openFiles(_ files: [IndexedFile]) {
+        for file in availableFiles(from: files) {
+            NSWorkspace.shared.open(URL(fileURLWithPath: file.fullPath))
         }
+    }
+
+    func availableFiles(from files: [IndexedFile]) -> [IndexedFile] {
+        let available = files.filter { FileManager.default.fileExists(atPath: $0.fullPath) }
+        let unavailableCount = files.count - available.count
+        if unavailableCount > 0 {
+            appState.statusText = locale.unavailableFiles(unavailableCount)
+        }
+        return available
+    }
+
+    func installResultsKeyMonitor() {
+        guard resultsKeyMonitor == nil else { return }
+        resultsKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 49 else { return event }
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard !modifiers.contains(.command),
+                  !modifiers.contains(.control),
+                  !modifiers.contains(.option) else { return event }
+
+            if QuickLookCoordinator.shared.isPreviewVisible {
+                QuickLookCoordinator.shared.closePreview()
+                return nil
+            }
+
+            guard !appState.selectedFiles.isEmpty,
+                  isResultsTableFocused(in: event.window) else { return event }
+            quickLookSelected()
+            return nil
+        }
+    }
+
+    func removeResultsKeyMonitor() {
+        if let resultsKeyMonitor {
+            NSEvent.removeMonitor(resultsKeyMonitor)
+            self.resultsKeyMonitor = nil
+        }
+    }
+
+    func isResultsTableFocused(in window: NSWindow?) -> Bool {
+        guard let window, !(window.firstResponder is NSTextView) else { return false }
+        var responder = window.firstResponder
+        while let current = responder {
+            if current is NSTableView { return true }
+            responder = current.nextResponder
+        }
+        return false
     }
 
     func browseFolder() {
@@ -529,7 +582,14 @@ final class FinderDragSourceView: NSView, NSDraggingSource {
     private var armedVisibleFiles: [IndexedFile] = []
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        bounds.contains(point) ? self : nil
+        if let event = NSApp.currentEvent {
+            let isRightClick = event.type == .rightMouseDown
+            let isControlClick = event.type == .leftMouseDown && event.modifierFlags.contains(.control)
+            if isRightClick || isControlClick {
+                return nil
+            }
+        }
+        return bounds.contains(point) ? self : nil
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -538,6 +598,7 @@ final class FinderDragSourceView: NSView, NSDraggingSource {
         updateSelection(for: file, event: event)
         armedSelectedIds = selectedIds.wrappedValue
         armedVisibleFiles = visibleFiles
+        focusEnclosingTable()
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -577,7 +638,9 @@ final class FinderDragSourceView: NSView, NSDraggingSource {
             files = [file]
         }
 
-        let urls = files.map { URL(fileURLWithPath: $0.fullPath) }
+        let urls = files
+            .filter { FileManager.default.fileExists(atPath: $0.fullPath) }
+            .map { URL(fileURLWithPath: $0.fullPath) }
         guard !urls.isEmpty else { return }
 
         let dragPoint = convert(event.locationInWindow, from: nil)
@@ -602,8 +665,19 @@ final class FinderDragSourceView: NSView, NSDraggingSource {
         armedVisibleFiles = []
     }
 
+    private func focusEnclosingTable() {
+        var view: NSView? = self
+        while let current = view {
+            if let tableView = current as? NSTableView {
+                window?.makeFirstResponder(tableView)
+                return
+            }
+            view = current.superview
+        }
+    }
+
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        [.copy, .move]
+        .copy
     }
 
     func ignoreModifierKeys(for session: NSDraggingSession) -> Bool {
@@ -654,9 +728,42 @@ struct FileIconView: View {
 final class QuickLookCoordinator: NSObject, QLPreviewPanelDataSource {
     static let shared = QuickLookCoordinator()
     var previewURLs: [URL] = []
+    private weak var panel: QLPreviewPanel?
+    private weak var previousKeyWindow: NSWindow?
+
+    var isPreviewVisible: Bool {
+        panel?.isVisible == true
+    }
+
+    func showPreview(urls: [URL]) {
+        guard !urls.isEmpty, let panel = QLPreviewPanel.shared() else { return }
+        if NSApp.keyWindow !== panel {
+            previousKeyWindow = NSApp.keyWindow
+        }
+        self.panel = panel
+        previewURLs = urls
+        panel.dataSource = self
+        panel.reloadData()
+        panel.currentPreviewItemIndex = 0
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    func togglePreview(urls: [URL]) {
+        if isPreviewVisible {
+            closePreview()
+        } else {
+            showPreview(urls: urls)
+        }
+    }
+
+    func closePreview() {
+        panel?.orderOut(nil)
+        previousKeyWindow?.makeKeyAndOrderFront(nil)
+    }
 
     func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int { previewURLs.count }
     func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
-        previewURLs[index] as QLPreviewItem
+        guard previewURLs.indices.contains(index) else { return nil }
+        return previewURLs[index] as QLPreviewItem
     }
 }

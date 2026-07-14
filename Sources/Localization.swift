@@ -112,6 +112,11 @@ final class LocaleManager: ObservableObject {
     func resultCount(_ count: Int) -> String {
         isChinese ? "\(count) 个结果" : "\(count) results"
     }
+    func unavailableFiles(_ count: Int) -> String {
+        isChinese
+            ? "\(count) 个文件当前不可用，可能已移动、删除或所在磁盘未挂载"
+            : "\(count) file(s) unavailable; they may have moved, been deleted, or be on an unmounted volume"
+    }
 
     // MARK: - Context Menu
 

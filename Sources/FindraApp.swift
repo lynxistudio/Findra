@@ -431,23 +431,37 @@ final class AppState: ObservableObject {
     }
 
     func revealInFinder(_ file: IndexedFile) {
+        guard FileManager.default.fileExists(atPath: file.fullPath) else {
+            statusText = locale?.unavailableFiles(1) ?? "File unavailable"
+            return
+        }
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.fullPath)])
     }
 
     func quickLookSelected() {
-        let files = dbManager.getFilesByIds(selectedFiles)
-        let urls = files.map { URL(fileURLWithPath: $0.fullPath) }
-        QuickLookCoordinator.shared.previewURLs = urls
-        if let panel = QLPreviewPanel.shared() {
-            panel.dataSource = QuickLookCoordinator.shared
-            panel.makeKeyAndOrderFront(nil)
+        let files = dbManager.getFilesByIds(selectedFiles).filter {
+            FileManager.default.fileExists(atPath: $0.fullPath)
         }
+        guard !files.isEmpty else {
+            statusText = locale?.unavailableFiles(selectedFiles.count) ?? "Files unavailable"
+            return
+        }
+        let urls = files.map { URL(fileURLWithPath: $0.fullPath) }
+        QuickLookCoordinator.shared.showPreview(urls: urls)
     }
 
     func openSelectedFiles() {
         let files = dbManager.getFilesByIds(selectedFiles)
+        var unavailableCount = 0
         for file in files {
-            NSWorkspace.shared.open(URL(fileURLWithPath: file.fullPath))
+            if FileManager.default.fileExists(atPath: file.fullPath) {
+                NSWorkspace.shared.open(URL(fileURLWithPath: file.fullPath))
+            } else {
+                unavailableCount += 1
+            }
+        }
+        if unavailableCount > 0 {
+            statusText = locale?.unavailableFiles(unavailableCount) ?? "Files unavailable"
         }
     }
 
