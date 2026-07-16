@@ -53,6 +53,11 @@ struct IndexedFile: Identifiable, Equatable {
     }
 }
 
+struct DirectoryIndexStats {
+    var fileCount: Int = 0
+    var folderCount: Int = 0
+}
+
 // MARK: - App Delegate (for menu bar and lifecycle)
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
@@ -214,6 +219,7 @@ final class AppState: ObservableObject {
     @Published var searchResults: [IndexedFile] = []
     @Published var searchQuery: String = ""
     @Published var totalFileCount: Int = 0
+    @Published var directoryIndexStats: [Int64: DirectoryIndexStats] = [:]
     @Published var isScanning: Bool = false
     @Published var scanProgress: String = ""
     @Published var statusText: String = "Ready"
@@ -241,6 +247,7 @@ final class AppState: ObservableObject {
         loadExcludedPatterns()
         addDefaultExcludedPatterns()
         updateStats()
+        refreshDirectoryIndexStats()
         setupSearch()
         startScheduledScans()
         startIncrementalScans()
@@ -281,6 +288,7 @@ final class AppState: ObservableObject {
         if let storedDirectory = directories.first(where: { $0.path == path }) {
             scanDirectory(storedDirectory)
         }
+        refreshDirectoryIndexStats()
         updateStats()
         startFSEventWatcher(for: path)
     }
@@ -290,6 +298,7 @@ final class AppState: ObservableObject {
         dbManager.removeDirectory(dir)
         loadDirectories()
         updateStats()
+        refreshDirectoryIndexStats()
     }
 
     func stopWatchingForDirectory(_ dir: IndexDirectory) {
@@ -327,6 +336,7 @@ final class AppState: ObservableObject {
         }
         updateStats()
         loadDirectories()
+        refreshDirectoryIndexStats()
         if !searchQuery.isEmpty {
             performSearch()
         }
@@ -364,6 +374,10 @@ final class AppState: ObservableObject {
 
     func updateStats() {
         totalFileCount = dbManager.getTotalFileCount()
+    }
+
+    func refreshDirectoryIndexStats() {
+        directoryIndexStats = dbManager.getDirectoryIndexStats()
     }
 
     private func startScheduledScans() {
@@ -418,6 +432,7 @@ final class AppState: ObservableObject {
             }
         }
         updateStats()
+        refreshDirectoryIndexStats()
         performSearch()
     }
 

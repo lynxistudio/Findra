@@ -154,4 +154,7 @@ final class LocaleManager: ObservableObject {
     func scanAlreadyRunning(path: String) -> String {
         isChinese ? "该目录正在扫描: \(path)" : "Scan already running: \(path)"
     }
+    func directoryIndexStats(folders: Int, files: Int) -> String {
+        isChinese ? "\(folders) 个文件夹，\(files) 个文件" : "\(folders) folders, \(files) files"
+    }
 }

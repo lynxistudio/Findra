@@ -461,6 +461,30 @@ final class DatabaseManager {
         }
     }
 
+    func getDirectoryIndexStats() -> [Int64: DirectoryIndexStats] {
+        dbQueue.sync {
+            var stats: [Int64: DirectoryIndexStats] = [:]
+            let sql = """
+            SELECT dir_id,
+                   SUM(CASE WHEN is_directory = 0 THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN is_directory = 1 THEN 1 ELSE 0 END)
+            FROM files
+            GROUP BY dir_id
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return stats }
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let dirId = sqlite3_column_int64(stmt, 0)
+                stats[dirId] = DirectoryIndexStats(
+                    fileCount: Int(sqlite3_column_int64(stmt, 1)),
+                    folderCount: Int(sqlite3_column_int64(stmt, 2))
+                )
+            }
+            sqlite3_finalize(stmt)
+            return stats
+        }
+    }
+
     func getFilesByIds(_ ids: Set<Int64>) -> [IndexedFile] {
         return dbQueue.sync {
             var files: [IndexedFile] = []

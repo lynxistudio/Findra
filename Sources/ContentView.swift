@@ -114,6 +114,11 @@ struct ContentView: View {
                                 if dir.enabled {
                                     Circle().fill(Color.green).frame(width: 5, height: 5)
                                     Text(locale.indexed).font(.system(size: 8)).foregroundColor(.green)
+                                    let stats = appState.directoryIndexStats[dir.id] ?? DirectoryIndexStats()
+                                    Text(locale.directoryIndexStats(folders: stats.folderCount, files: stats.fileCount))
+                                        .font(.system(size: 8))
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
                                 }
                             }
                         }
