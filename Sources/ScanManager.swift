@@ -1,258 +1,161 @@
 import Foundation
 import Combine
 
+struct DirectoryScanResult {
+    let count: Int
+    let errorMessage: String?
+    let isAlreadyRunning: Bool
+
+    var isSuccess: Bool {
+        errorMessage == nil && !isAlreadyRunning
+    }
+}
+
 final class ScanManager {
     private var watchers: [String: FSEventWatcher] = [:]
+    private let scanLock = NSLock()
+    private var activeScanPaths = Set<String>()
 
-    // Default excluded patterns
-    static let defaultExcludedPatterns: [String] = [
-        ".git", "node_modules", ".cache", "tmp", "temp",
-        "Trash", "Recycle Bin", "@eaDir", "#recycle", ".recycle",
-        "System Volume Information", ".DS_Store", "Thumbs.db"
-    ]
+    // Only patterns the user explicitly adds are excluded. Index roots are otherwise exhaustive.
+    static let defaultExcludedPatterns: [String] = []
 
     // MARK: - Directory Scanning (Full)
 
-    func scanDirectory(_ dir: IndexDirectory, dbManager: DatabaseManager) -> Int {
-        return scanDirectory(dir, dbManager: dbManager, incremental: false, lastScanTime: 0)
-    }
-
-    /// Incremental scan: only files newer than lastScanTime
-    func scanDirectoryIncremental(_ dir: IndexDirectory, dbManager: DatabaseManager) -> Int {
-        let lastScan = dbManager.getLastScanTime(for: dir.id)
-        guard lastScan > 0 else {
-            return scanDirectory(dir, dbManager: dbManager, incremental: false, lastScanTime: 0)
+    func scanDirectory(_ dir: IndexDirectory, dbManager: DatabaseManager) -> DirectoryScanResult {
+        guard reserveScan(for: dir.path) else {
+            return DirectoryScanResult(count: 0, errorMessage: nil, isAlreadyRunning: true)
         }
-        return scanDirectory(dir, dbManager: dbManager, incremental: true, lastScanTime: lastScan)
-    }
+        defer { finishScan(for: dir.path) }
 
-    private func scanDirectory(_ dir: IndexDirectory, dbManager: DatabaseManager, incremental: Bool, lastScanTime: Double) -> Int {
-        let path = dir.path
-        guard FileManager.default.fileExists(atPath: path) else {
-            print("目录不存在: \(path)")
-            return 0
+        guard let indexedDirectory = dbManager.getAllDirectories().first(where: { $0.path == dir.path }) else {
+            return DirectoryScanResult(count: 0, errorMessage: "Indexed directory was removed", isAlreadyRunning: false)
         }
 
-        let scannerCmd: String
-        if let fdPath = findExecutable("fd") {
-            scannerCmd = fdPath
-        } else {
-            scannerCmd = "/usr/bin/find"
+        let rootURL = URL(fileURLWithPath: dir.path, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: rootURL.path) else {
+            return DirectoryScanResult(count: 0, errorMessage: "Indexed directory is unavailable", isAlreadyRunning: false)
         }
-        let isFd = scannerCmd.hasSuffix("fd")
+
+        let scanId = UUID().uuidString
+        guard dbManager.beginDirectoryScan(scanId) else {
+            return DirectoryScanResult(count: 0, errorMessage: "Could not prepare scan staging", isAlreadyRunning: false)
+        }
 
         let excludedPatterns = dbManager.getAllExcludedPatterns()
-        let dirs = dbManager.getAllDirectories()
-        guard let currentDir = dirs.first(where: { $0.path == path }) else { return 0 }
-        let dirId = currentDir.id
-
-        let fileResults = scanFilesWithCommand(scannerCmd, path: path, isFd: isFd,
-                                                excludedPatterns: excludedPatterns,
-                                                incremental: incremental, lastScanTime: lastScanTime)
-        let dirResults = scanDirsWithCommand(scannerCmd, path: path, isFd: isFd,
-                                              excludedPatterns: excludedPatterns,
-                                              incremental: incremental, lastScanTime: lastScanTime)
-
-        var allEntries: [(fileName: String, fullPath: String, size: Int64, modDate: Double, isDirectory: Bool)] = []
-        for f in fileResults {
-            allEntries.append((f.fileName, f.fullPath, f.size, f.modDate, false))
-        }
-        for d in dirResults {
-            allEntries.append((d.fileName, d.fullPath, 0, d.modDate, true))
-        }
-
-        if allEntries.isEmpty {
-            if !incremental { print("警告: 目录 \(path) 扫描结果为 0") }
-            dbManager.updateLastScanTime(dir)
-            return 0
-        }
-
-        if incremental {
-            let entries: [(String, String, Int64, Double, Bool)] = allEntries.map { ($0.0, $0.1, $0.2, $0.3, $0.4) }
-            dbManager.insertFilesBatch(entries.map { (fileName: $0.0, fullPath: $0.1, size: $0.2, modDate: $0.3, dirId: dirId, isDirectory: $0.4) })
-        } else {
-            dbManager.replaceDirectoryEntries(dirId: dirId, entries: allEntries)
-        }
-
-        dbManager.updateLastScanTime(dir)
-        print("扫描完成: \(fileResults.count) 个文件, \(dirResults.count) 个子文件夹 (\(incremental ? "增量" : "全量"))")
-        return allEntries.count
-    }
-
-    private func scanFilesWithCommand(_ cmd: String, path: String, isFd: Bool,
-                                       excludedPatterns: [String],
-                                       incremental: Bool, lastScanTime: Double) -> [(fileName: String, fullPath: String, size: Int64, modDate: Double)] {
-        let lines = runFindCommand(cmd, path: path, isFd: isFd, typeFlag: "f",
-                                    incremental: incremental, lastScanTime: lastScanTime)
-        var results: [(fileName: String, fullPath: String, size: Int64, modDate: Double)] = []
-        results.reserveCapacity(lines.count)
-
-        for line in lines {
-            let fullPath = String(line)
-            if isPathExcluded(fullPath, excludedPatterns: excludedPatterns) { continue }
-            let fileName = URL(fileURLWithPath: fullPath).lastPathComponent
-
-            var size: Int64 = 0
-            var modDate: Double = 0
-            if let attrs = try? FileManager.default.attributesOfItem(atPath: fullPath) {
-                size = (attrs[.size] as? Int64) ?? 0
-                modDate = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let resourceKeys: Set<URLResourceKey> = [
+            .isDirectoryKey,
+            .isRegularFileKey,
+            .fileSizeKey,
+            .contentModificationDateKey
+        ]
+        let fileManager = FileManager.default
+        var scanErrors: [String] = []
+        guard let enumerator = fileManager.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: Array(resourceKeys),
+            options: [],
+            errorHandler: { url, error in
+                scanErrors.append("\(url.path): \(error.localizedDescription)")
+                return true
             }
-            results.append((fileName: fileName, fullPath: fullPath, size: size, modDate: modDate))
+        ) else {
+            dbManager.discardDirectoryScan(scanId)
+            return DirectoryScanResult(count: 0, errorMessage: "Could not enumerate indexed directory", isAlreadyRunning: false)
         }
 
-        print("文件扫描: \(results.count) 个文件")
-        return results
-    }
+        var batch: [(fileName: String, fullPath: String, size: Int64, modDate: Double, isDirectory: Bool)] = []
+        var entryCount = 0
+        var stagingFailed = false
 
-    private func scanDirsWithCommand(_ cmd: String, path: String, isFd: Bool,
-                                      excludedPatterns: [String],
-                                      incremental: Bool, lastScanTime: Double) -> [(fileName: String, fullPath: String, modDate: Double)] {
-        let lines = runFindCommand(cmd, path: path, isFd: isFd, typeFlag: "d",
-                                    incremental: incremental, lastScanTime: lastScanTime)
-        var results: [(fileName: String, fullPath: String, modDate: Double)] = []
-        results.reserveCapacity(lines.count)
-
-        for line in lines {
-            let fullPath = String(line)
-            if fullPath == path { continue }
-            if isPathExcluded(fullPath, excludedPatterns: excludedPatterns) { continue }
-            let fileName = URL(fileURLWithPath: fullPath).lastPathComponent
-
-            var modDate: Double = 0
-            if let attrs = try? FileManager.default.attributesOfItem(atPath: fullPath) {
-                modDate = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        func flushBatch() {
+            guard !batch.isEmpty else { return }
+            if dbManager.appendDirectoryScanEntries(scanId, entries: batch) {
+                entryCount += batch.count
+                batch.removeAll(keepingCapacity: true)
+            } else {
+                stagingFailed = true
             }
-            results.append((fileName: fileName, fullPath: fullPath, modDate: modDate))
         }
-        print("目录扫描: \(results.count) 个子文件夹")
-        return results
+
+        for case let url as URL in enumerator {
+            if isPathExcluded(url.path, relativeTo: rootURL.path, excludedPatterns: excludedPatterns) {
+                if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                    enumerator.skipDescendants()
+                }
+                continue
+            }
+
+            do {
+                let values = try url.resourceValues(forKeys: resourceKeys)
+                let isDirectory = values.isDirectory == true
+                let isRegularFile = values.isRegularFile == true
+                guard isDirectory || isRegularFile else { continue }
+
+                batch.append((
+                    fileName: url.lastPathComponent,
+                    fullPath: url.path,
+                    size: isDirectory ? 0 : Int64(values.fileSize ?? 0),
+                    modDate: values.contentModificationDate?.timeIntervalSince1970 ?? 0,
+                    isDirectory: isDirectory
+                ))
+                if batch.count >= 1_000 {
+                    flushBatch()
+                    if stagingFailed { break }
+                }
+            } catch {
+                scanErrors.append("\(url.path): \(error.localizedDescription)")
+            }
+        }
+
+        if !stagingFailed { flushBatch() }
+
+        guard !stagingFailed else {
+            dbManager.discardDirectoryScan(scanId)
+            return DirectoryScanResult(count: 0, errorMessage: "Could not write scan results", isAlreadyRunning: false)
+        }
+        guard scanErrors.isEmpty else {
+            dbManager.discardDirectoryScan(scanId)
+            return DirectoryScanResult(count: 0, errorMessage: "Scan incomplete: \(scanErrors.count) path(s) could not be read", isAlreadyRunning: false)
+        }
+        guard dbManager.commitDirectoryScan(scanId, dirId: indexedDirectory.id) else {
+            dbManager.discardDirectoryScan(scanId)
+            return DirectoryScanResult(count: 0, errorMessage: "Could not update index", isAlreadyRunning: false)
+        }
+
+        dbManager.updateLastScanTime(indexedDirectory)
+        print("扫描完成: \(entryCount) 个条目 (完整同步)")
+        return DirectoryScanResult(count: entryCount, errorMessage: nil, isAlreadyRunning: false)
     }
 
     // MARK: - Exclusion Checking
 
-    private func isPathExcluded(_ path: String, excludedPatterns: [String]) -> Bool {
+    private func isPathExcluded(_ path: String, relativeTo rootPath: String? = nil, excludedPatterns: [String]) -> Bool {
         let allPatterns = ScanManager.defaultExcludedPatterns + excludedPatterns
-        let components = path.split(separator: "/").map(String.init)
+        let relativePath: String
+        if let rootPath, path.hasPrefix(rootPath + "/") {
+            relativePath = String(path.dropFirst(rootPath.count + 1))
+        } else {
+            relativePath = path
+        }
+        let components = relativePath.split(separator: "/").map(String.init)
         for pattern in allPatterns {
             if components.contains(pattern) { return true }
         }
         return false
     }
 
-    // MARK: - Command Runner
-
-    private func runFindCommand(_ cmd: String, path: String, isFd: Bool, typeFlag: String,
-                                 incremental: Bool, lastScanTime: Double) -> [String] {
-        let process = Process()
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-
-        if isFd {
-            process.executableURL = URL(fileURLWithPath: cmd)
-            process.arguments = [".", path, "--type", typeFlag, "--absolute-path"]
-        } else {
-            process.executableURL = URL(fileURLWithPath: cmd)
-            var args = ["-x", path, "-type", typeFlag]
-            if incremental && lastScanTime > 0 {
-                let refPath = "/tmp/.findra_ref_\(Int(lastScanTime))"
-                let refDate = Date(timeIntervalSince1970: lastScanTime)
-                if FileManager.default.fileExists(atPath: refPath) {
-                    try? FileManager.default.setAttributes([.modificationDate: refDate], ofItemAtPath: refPath)
-                } else {
-                    FileManager.default.createFile(atPath: refPath, contents: Data())
-                    try? FileManager.default.setAttributes([.modificationDate: refDate], ofItemAtPath: refPath)
-                }
-                args.append("-newer")
-                args.append(refPath)
-            }
-            process.arguments = args
-        }
-
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-        process.qualityOfService = .utility
-
-        var env = ProcessInfo.processInfo.environment
-        env["PATH"] = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-        process.environment = env
-
-        var stdoutData = Data()
-        let stdoutGroup = DispatchGroup()
-        stdoutGroup.enter()
-        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            if data.isEmpty {
-                stdoutPipe.fileHandleForReading.readabilityHandler = nil
-                stdoutGroup.leave()
-            } else {
-                stdoutData.append(data)
-            }
-        }
-
-        var stderrData = Data()
-        let stderrGroup = DispatchGroup()
-        stderrGroup.enter()
-        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            if data.isEmpty {
-                stderrPipe.fileHandleForReading.readabilityHandler = nil
-                stderrGroup.leave()
-            } else {
-                stderrData.append(data)
-            }
-        }
-
-        do {
-            try process.run()
-
-            let timeoutSeconds: Double = 120
-            let timeoutWorkItem = DispatchWorkItem { [weak process] in
-                if process?.isRunning == true {
-                    process?.terminate()
-                    print("扫描超时 (\(Int(timeoutSeconds))秒): \(path)")
-                }
-            }
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeoutSeconds, execute: timeoutWorkItem)
-
-            process.waitUntilExit()
-            timeoutWorkItem.cancel()
-            _ = stdoutGroup.wait(timeout: .now() + 5)
-            _ = stderrGroup.wait(timeout: .now() + 5)
-
-            if process.terminationStatus != 0 {
-                let errStr = String(data: stderrData, encoding: .utf8) ?? ""
-                let trimmed = errStr.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    print("扫描失败 (退出码 \(process.terminationStatus)): \(trimmed)")
-                }
-            }
-
-            guard let output = String(data: stdoutData, encoding: .utf8) else { return [] }
-            return output.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
-        } catch {
-            print("扫描失败: \(error)")
-            return []
-        }
+    private func reserveScan(for path: String) -> Bool {
+        scanLock.lock()
+        defer { scanLock.unlock() }
+        guard !activeScanPaths.contains(path) else { return false }
+        activeScanPaths.insert(path)
+        return true
     }
 
-    private func findExecutable(_ name: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        process.arguments = [name]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let output = output, !output.isEmpty, FileManager.default.fileExists(atPath: output) {
-                return output
-            }
-        } catch {}
-        return nil
+    private func finishScan(for path: String) {
+        scanLock.lock()
+        activeScanPaths.remove(path)
+        scanLock.unlock()
     }
 
     // MARK: - FSEvents Watching
@@ -277,7 +180,9 @@ final class ScanManager {
     func handleFileSystemEvent(path: String, dbManager: DatabaseManager) {
         let fm = FileManager.default
         let dirs = dbManager.getAllDirectories()
-        guard let dir = dirs.first(where: { path.hasPrefix($0.path) }) else { return }
+        guard let dir = dirs
+            .filter({ path == $0.path || path.hasPrefix($0.path + "/") })
+            .max(by: { $0.path.count < $1.path.count }) else { return }
 
         if fm.fileExists(atPath: path) {
             let fileName = URL(fileURLWithPath: path).lastPathComponent
@@ -290,7 +195,7 @@ final class ScanManager {
                 modDate = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
             }
             let excludedPatterns = dbManager.getAllExcludedPatterns()
-            if !isPathExcluded(path, excludedPatterns: excludedPatterns) {
+            if !isPathExcluded(path, relativeTo: dir.path, excludedPatterns: excludedPatterns) {
                 dbManager.insertFilesBatch([(fileName: fileName, fullPath: path, size: size, modDate: modDate, dirId: dir.id, isDirectory: isDirectory)])
             }
         } else {

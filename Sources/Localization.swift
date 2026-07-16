@@ -146,4 +146,12 @@ final class LocaleManager: ObservableObject {
             ? "扫描完成: \(path) (\(count) 个文件)"
             : "Scan complete: \(path) (\(count) files)"
     }
+    func scanFailed(path: String, reason: String) -> String {
+        isChinese
+            ? "扫描未完成，已保留原有索引: \(path) (\(reason))"
+            : "Scan incomplete; existing index kept: \(path) (\(reason))"
+    }
+    func scanAlreadyRunning(path: String) -> String {
+        isChinese ? "该目录正在扫描: \(path)" : "Scan already running: \(path)"
+    }
 }

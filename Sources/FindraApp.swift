@@ -245,6 +245,8 @@ final class AppState: ObservableObject {
         startScheduledScans()
         startIncrementalScans()
         startFSEventWatchers()
+        // Rebuild every configured root in the background after launch. Search remains database-only.
+        scanAllDirectories()
     }
 
     func loadDirectories() {
@@ -276,7 +278,9 @@ final class AppState: ObservableObject {
         let dir = IndexDirectory(path: path, type: type, enabled: true)
         dbManager.addDirectory(dir)
         loadDirectories()
-        scanDirectory(dir)
+        if let storedDirectory = directories.first(where: { $0.path == path }) {
+            scanDirectory(storedDirectory)
+        }
         updateStats()
         startFSEventWatcher(for: path)
     }
@@ -299,19 +303,32 @@ final class AppState: ObservableObject {
         scanProgress = loc?.scanning(dir.path) ?? "Scanning: \(dir.path)"
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self = self else { return }
-            let count = self.scanManager.scanDirectory(dir, dbManager: self.dbManager)
-            DispatchQueue.main.async {
-                self.isScanning = false
-                self.scanProgress = ""
-                let loc = self.locale
-                self.statusText = loc?.scanComplete(path: dir.path, count: count) ?? "Scan complete: \(dir.path) (\(count) files)"
-                self.updateStats()
-                self.loadDirectories()
-                if !self.searchQuery.isEmpty {
-                    self.performSearch()
-                }
-            }
+            self?.runDirectoryScan(dir)
+        }
+    }
+
+    private func runDirectoryScan(_ dir: IndexDirectory) {
+        let result = scanManager.scanDirectory(dir, dbManager: dbManager)
+        DispatchQueue.main.async { [weak self] in
+            self?.finishScan(result, for: dir)
+        }
+    }
+
+    private func finishScan(_ result: DirectoryScanResult, for dir: IndexDirectory) {
+        isScanning = false
+        scanProgress = ""
+        let loc = locale
+        if result.isAlreadyRunning {
+            statusText = loc?.scanAlreadyRunning(path: dir.path) ?? "Scan already running: \(dir.path)"
+        } else if result.isSuccess {
+            statusText = loc?.scanComplete(path: dir.path, count: result.count) ?? "Scan complete: \(dir.path) (\(result.count) files)"
+        } else {
+            statusText = loc?.scanFailed(path: dir.path, reason: result.errorMessage ?? "Unknown error") ?? "Scan incomplete: \(dir.path)"
+        }
+        updateStats()
+        loadDirectories()
+        if !searchQuery.isEmpty {
+            performSearch()
         }
     }
 
@@ -322,7 +339,6 @@ final class AppState: ObservableObject {
     }
 
     func rescanDirectory(_ dir: IndexDirectory) {
-        dbManager.clearDirectoryFiles(dir)
         scanDirectory(dir)
     }
 
@@ -351,7 +367,7 @@ final class AppState: ObservableObject {
     }
 
     private func startScheduledScans() {
-        // Full scan for non-local directories every 5 minutes
+        // Reconcile network volumes regularly. Queries remain index-only and never wait for this work.
         scanTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             for dir in self.directories where dir.enabled && dir.type != .local {
@@ -361,13 +377,11 @@ final class AppState: ObservableObject {
     }
 
     private func startIncrementalScans() {
-        // Incremental scan for local directories every 1 minute
-        incrementalTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+        // A complete local reconciliation catches moved or copied folders that FSEvents cannot expand recursively.
+        incrementalTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             for dir in self.directories where dir.enabled && dir.type == .local {
-                DispatchQueue.global(qos: .background).async {
-                    _ = self.scanManager.scanDirectoryIncremental(dir, dbManager: self.dbManager)
-                }
+                self.scanDirectory(dir)
             }
         }
     }

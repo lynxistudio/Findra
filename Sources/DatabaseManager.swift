@@ -84,6 +84,19 @@ final class DatabaseManager {
             let idxModDate = "CREATE INDEX IF NOT EXISTS idx_files_mod_date ON files(mod_date);"
             sqlite3_exec(db, idxModDate, nil, nil, nil)
 
+            let createScanStaging = """
+            CREATE TABLE IF NOT EXISTS scan_staging (
+                scan_id TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                full_path TEXT NOT NULL,
+                size INTEGER DEFAULT 0,
+                mod_date REAL DEFAULT 0,
+                is_directory INTEGER DEFAULT 0,
+                PRIMARY KEY (scan_id, full_path)
+            );
+            """
+            sqlite3_exec(db, createScanStaging, nil, nil, nil)
+
             // Excluded directories table
             let createExcluded = """
             CREATE TABLE IF NOT EXISTS excluded_dirs (
@@ -93,7 +106,36 @@ final class DatabaseManager {
             """
             sqlite3_exec(db, createExcluded, nil, nil, nil)
 
-            // FTS5 virtual table for full-text search
+            var schemaVersion = 0
+            var versionStatement: OpaquePointer?
+            if sqlite3_prepare_v2(db, "PRAGMA user_version", -1, &versionStatement, nil) == SQLITE_OK,
+               sqlite3_step(versionStatement) == SQLITE_ROW {
+                schemaVersion = Int(sqlite3_column_int(versionStatement, 0))
+            }
+            sqlite3_finalize(versionStatement)
+
+            // Older releases silently added these exclusions. Remove them once so a root is
+            // exhaustive by default, while preserving exclusions the user adds from now on.
+            if schemaVersion < 2 {
+                let legacyDefaultExclusions = [
+                    ".git", "node_modules", ".cache", "tmp", "temp",
+                    "Trash", "Recycle Bin", "@eaDir", "#recycle", ".recycle",
+                    "System Volume Information", ".DS_Store", "Thumbs.db"
+                ]
+                var removeLegacyExclusion: OpaquePointer?
+                if sqlite3_prepare_v2(db, "DELETE FROM excluded_dirs WHERE pattern = ?", -1, &removeLegacyExclusion, nil) == SQLITE_OK {
+                    for pattern in legacyDefaultExclusions {
+                        sqlite3_reset(removeLegacyExclusion)
+                        sqlite3_clear_bindings(removeLegacyExclusion)
+                        sqlite3_bind_text(removeLegacyExclusion, 1, pattern, -1, SQLITE_TRANSIENT)
+                        sqlite3_step(removeLegacyExclusion)
+                    }
+                }
+                sqlite3_finalize(removeLegacyExclusion)
+                sqlite3_exec(db, "PRAGMA user_version = 2", nil, nil, nil)
+            }
+
+            // Trigram FTS keeps multi-word partial filename searches index-only and fast.
             sqlite3_exec(db, "DROP TABLE IF EXISTS files_fts", nil, nil, nil)
             let createFts = """
             CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
@@ -101,7 +143,7 @@ final class DatabaseManager {
                 full_path,
                 content='files',
                 content_rowid='id',
-                tokenize='unicode61 remove_diacritics 0'
+                tokenize='trigram'
             );
             """
             sqlite3_exec(db, createFts, nil, nil, nil)
@@ -269,6 +311,123 @@ final class DatabaseManager {
         }
     }
 
+    // MARK: - Transactional Directory Scans
+
+    /// Scan results are staged first, so a failed or incomplete scan never replaces a valid index.
+    func beginDirectoryScan(_ scanId: String) -> Bool {
+        dbQueue.sync {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "DELETE FROM scan_staging WHERE scan_id = ?", -1, &stmt, nil) == SQLITE_OK else { return false }
+            sqlite3_bind_text(stmt, 1, scanId, -1, SQLITE_TRANSIENT)
+            let success = sqlite3_step(stmt) == SQLITE_DONE
+            sqlite3_finalize(stmt)
+            return success
+        }
+    }
+
+    func appendDirectoryScanEntries(_ scanId: String, entries: [(fileName: String, fullPath: String, size: Int64, modDate: Double, isDirectory: Bool)]) -> Bool {
+        guard !entries.isEmpty else { return true }
+
+        return dbQueue.sync {
+            guard sqlite3_exec(db, "BEGIN IMMEDIATE TRANSACTION", nil, nil, nil) == SQLITE_OK else { return false }
+            let sql = """
+            INSERT OR REPLACE INTO scan_staging (scan_id, file_name, full_path, size, mod_date, is_directory)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+                return false
+            }
+
+            var success = true
+            for entry in entries {
+                sqlite3_reset(stmt)
+                sqlite3_clear_bindings(stmt)
+                sqlite3_bind_text(stmt, 1, scanId, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, 2, entry.fileName, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, 3, entry.fullPath, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_int64(stmt, 4, entry.size)
+                sqlite3_bind_double(stmt, 5, entry.modDate)
+                sqlite3_bind_int(stmt, 6, entry.isDirectory ? 1 : 0)
+                if sqlite3_step(stmt) != SQLITE_DONE {
+                    success = false
+                    break
+                }
+            }
+            sqlite3_finalize(stmt)
+
+            guard success else {
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+                return false
+            }
+            return sqlite3_exec(db, "COMMIT", nil, nil, nil) == SQLITE_OK
+        }
+    }
+
+    func commitDirectoryScan(_ scanId: String, dirId: Int64) -> Bool {
+        dbQueue.sync {
+            guard sqlite3_exec(db, "BEGIN IMMEDIATE TRANSACTION", nil, nil, nil) == SQLITE_OK else { return false }
+
+            var deleteFiles: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "DELETE FROM files WHERE dir_id = ?", -1, &deleteFiles, nil) == SQLITE_OK else {
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+                return false
+            }
+            sqlite3_bind_int64(deleteFiles, 1, dirId)
+            guard sqlite3_step(deleteFiles) == SQLITE_DONE else {
+                sqlite3_finalize(deleteFiles)
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+                return false
+            }
+            sqlite3_finalize(deleteFiles)
+
+            let insertSQL = """
+            INSERT OR REPLACE INTO files (file_name, full_path, size, mod_date, dir_id, is_directory)
+            SELECT file_name, full_path, size, mod_date, ?, is_directory
+            FROM scan_staging WHERE scan_id = ?
+            """
+            var insertFiles: OpaquePointer?
+            guard sqlite3_prepare_v2(db, insertSQL, -1, &insertFiles, nil) == SQLITE_OK else {
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+                return false
+            }
+            sqlite3_bind_int64(insertFiles, 1, dirId)
+            sqlite3_bind_text(insertFiles, 2, scanId, -1, SQLITE_TRANSIENT)
+            guard sqlite3_step(insertFiles) == SQLITE_DONE else {
+                sqlite3_finalize(insertFiles)
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+                return false
+            }
+            sqlite3_finalize(insertFiles)
+
+            var deleteStaging: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "DELETE FROM scan_staging WHERE scan_id = ?", -1, &deleteStaging, nil) == SQLITE_OK else {
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+                return false
+            }
+            sqlite3_bind_text(deleteStaging, 1, scanId, -1, SQLITE_TRANSIENT)
+            guard sqlite3_step(deleteStaging) == SQLITE_DONE else {
+                sqlite3_finalize(deleteStaging)
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+                return false
+            }
+            sqlite3_finalize(deleteStaging)
+
+            return sqlite3_exec(db, "COMMIT", nil, nil, nil) == SQLITE_OK
+        }
+    }
+
+    func discardDirectoryScan(_ scanId: String) {
+        dbQueue.sync {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "DELETE FROM scan_staging WHERE scan_id = ?", -1, &stmt, nil) == SQLITE_OK else { return }
+            sqlite3_bind_text(stmt, 1, scanId, -1, SQLITE_TRANSIENT)
+            sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+        }
+    }
+
     func clearDirectoryFiles(_ dir: IndexDirectory) {
         dbQueue.sync {
             var stmt: OpaquePointer?
@@ -330,7 +489,8 @@ final class DatabaseManager {
             let tokens = query.split(separator: " ").map(String.init).filter { !$0.isEmpty }
             guard !tokens.isEmpty else { return files }
 
-            // Use FTS5 for multi-token search, fallback to LIKE for single token
+            // A single partial term is inexpensive with LIKE. Multiple substantial terms use
+            // the trigram index, preserving substring semantics without scanning the disk.
             if tokens.count == 1 {
                 let likePattern = "%\(tokens[0])%"
                 let sql = "SELECT id, file_name, full_path, size, mod_date, dir_id, is_directory FROM files WHERE file_name LIKE ? LIMIT ?"
@@ -342,9 +502,8 @@ final class DatabaseManager {
                     files.append(readFile(stmt))
                 }
                 sqlite3_finalize(stmt)
-            } else {
-                // Multi-token: use FTS5 for speed
-                let ftsQuery = tokens.joined(separator: " ")
+            } else if tokens.allSatisfy({ $0.count >= 3 }) {
+                let ftsQuery = tokens.map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"" }.joined(separator: " AND ")
                 let sql = """
                 SELECT f.id, f.file_name, f.full_path, f.size, f.mod_date, f.dir_id, f.is_directory
                 FROM files_fts ft
@@ -356,6 +515,19 @@ final class DatabaseManager {
                 guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return files }
                 sqlite3_bind_text(stmt, 1, ftsQuery, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_int(stmt, 2, Int32(limit))
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    files.append(readFile(stmt))
+                }
+                sqlite3_finalize(stmt)
+            } else {
+                let conditions = tokens.map { _ in "file_name LIKE ?" }.joined(separator: " AND ")
+                let sql = "SELECT id, file_name, full_path, size, mod_date, dir_id, is_directory FROM files WHERE \(conditions) LIMIT ?"
+                var stmt: OpaquePointer?
+                guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return files }
+                for (index, token) in tokens.enumerated() {
+                    sqlite3_bind_text(stmt, Int32(index + 1), "%\(token)%", -1, SQLITE_TRANSIENT)
+                }
+                sqlite3_bind_int(stmt, Int32(tokens.count + 1), Int32(limit))
                 while sqlite3_step(stmt) == SQLITE_ROW {
                     files.append(readFile(stmt))
                 }
