@@ -420,6 +420,7 @@ struct ContentView: View {
         if files.count == 1 {
             Button(locale.rename) { appState.startEditingFile(files[0]) }
             Divider()
+            Button(locale.copy) { appState.copyFiles(ids) }
             Button(locale.showInFinder) { appState.revealInFinder(files[0]) }
             Button(locale.quickLook) { quickLookFiles(files) }
             Divider()
@@ -427,6 +428,7 @@ struct ContentView: View {
             Divider()
             Button(locale.moveToTrash, role: .destructive) { appState.deleteFiles(ids) }
         } else if !ids.isEmpty {
+            Button(locale.copy) { appState.copyFiles(ids) }
             Button(locale.quickLook) { quickLookFiles(files) }
             Button(locale.open) { appState.openSelectedFiles() }
             Divider()
@@ -498,8 +500,16 @@ struct ContentView: View {
     func installResultsKeyMonitor() {
         guard resultsKeyMonitor == nil else { return }
         resultsKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard event.keyCode == 49 else { return event }
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if modifiers == [.command], event.charactersIgnoringModifiers?.lowercased() == "c" {
+                guard appState.editingFileId == nil,
+                      !appState.selectedFiles.isEmpty,
+                      isResultsTableFocused(in: event.window) else { return event }
+                appState.copyFiles(appState.selectedFiles)
+                return nil
+            }
+
+            guard event.keyCode == 49 else { return event }
             guard !modifiers.contains(.command),
                   !modifiers.contains(.control),
                   !modifiers.contains(.option) else { return event }

@@ -467,6 +467,27 @@ final class AppState: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.fullPath)])
     }
 
+    func copyFiles(_ fileIds: Set<Int64>) {
+        let files = dbManager.getFilesByIds(fileIds)
+        let availableFiles = files.filter { FileManager.default.fileExists(atPath: $0.fullPath) }
+        guard !availableFiles.isEmpty else {
+            statusText = locale?.unavailableFiles(files.count) ?? "Files unavailable"
+            return
+        }
+
+        let urls = availableFiles.map { URL(fileURLWithPath: $0.fullPath) as NSURL }
+        NSPasteboard.general.clearContents()
+        guard NSPasteboard.general.writeObjects(urls) else {
+            statusText = locale?.copyFailed ?? "Could not copy files"
+            return
+        }
+
+        statusText = locale?.copiedFiles(availableFiles.count) ?? "Copied \(availableFiles.count) file(s)"
+        if availableFiles.count != files.count {
+            statusText += " - " + (locale?.unavailableFiles(files.count - availableFiles.count) ?? "Some files unavailable")
+        }
+    }
+
     func quickLookSelected() {
         let files = dbManager.getFilesByIds(selectedFiles).filter {
             FileManager.default.fileExists(atPath: $0.fullPath)

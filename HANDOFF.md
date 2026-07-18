@@ -10,6 +10,7 @@ Last updated: 2026-07-18 06:35 Asia/Singapore
 - Every configured root is fully reconciled at launch and on a five-minute schedule.
 - The sidebar displays indexed folder and file totals per root.
 - Search accepts filename substrings and uses a trigram FTS path for multi-term queries.
+- Selected results can be dragged as standard file URLs or copied to Finder's pasteboard with `Cmd+C`.
 
 ## Important Decisions
 - Do not traverse disks while a user is typing; searches query SQLite only.
@@ -22,6 +23,7 @@ Last updated: 2026-07-18 06:35 Asia/Singapore
 - `Sources/FindraApp.swift`: scan lifecycle and sidebar statistics state.
 - `Sources/SearchManager.swift`: one-line query normalization.
 - `Sources/ContentView.swift`: index totals in sidebar.
+- `Sources/FindraApp.swift` and `Sources/ContentView.swift`: multi-file copy/paste and context-menu copy.
 
 ## Deployment / External State
 - Installed app: `/Applications/Findra.app`.

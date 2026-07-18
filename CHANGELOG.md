@@ -2,6 +2,7 @@
 
 ## 2026-07-18
 - Fixed searches being polluted by hidden multi-line input metadata: Findra now searches the visible first line only.
+- Added Finder-compatible copy/paste for selected search results, including multi-file selections.
 
 ## 2026-07-16
 - Added complete atomic directory indexing, substring search improvements, and per-directory indexed file/folder counts.

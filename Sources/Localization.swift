@@ -117,6 +117,12 @@ final class LocaleManager: ObservableObject {
             ? "\(count) 个文件当前不可用，可能已移动、删除或所在磁盘未挂载"
             : "\(count) file(s) unavailable; they may have moved, been deleted, or be on an unmounted volume"
     }
+    func copiedFiles(_ count: Int) -> String {
+        isChinese ? "已复制 \(count) 个文件" : "Copied \(count) file(s)"
+    }
+    var copyFailed: String {
+        isChinese ? "无法复制文件" : "Could not copy files"
+    }
 
     // MARK: - Context Menu
 
@@ -128,6 +134,9 @@ final class LocaleManager: ObservableObject {
     }
     var quickLook: String {
         isChinese ? "快速查看" : "Quick Look"
+    }
+    var copy: String {
+        isChinese ? "复制" : "Copy"
     }
     var open: String {
         isChinese ? "打开" : "Open"
