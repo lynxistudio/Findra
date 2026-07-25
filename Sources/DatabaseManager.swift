@@ -231,6 +231,40 @@ final class DatabaseManager {
         }
     }
 
+    /// A parent index root already covers its descendants, so nested roots would duplicate paths.
+    func removeDirectoriesNestedWithin(_ parentPath: String) {
+        let prefix = parentPath.hasSuffix("/") ? parentPath : parentPath + "/"
+        dbQueue.sync {
+            let sql = "SELECT id FROM directories WHERE path LIKE ?"
+            var selectStmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &selectStmt, nil) == SQLITE_OK else { return }
+            sqlite3_bind_text(selectStmt, 1, "\(prefix)%", -1, SQLITE_TRANSIENT)
+
+            var nestedIds: [Int64] = []
+            while sqlite3_step(selectStmt) == SQLITE_ROW {
+                nestedIds.append(sqlite3_column_int64(selectStmt, 0))
+            }
+            sqlite3_finalize(selectStmt)
+
+            guard !nestedIds.isEmpty else { return }
+            for id in nestedIds {
+                var deleteFiles: OpaquePointer?
+                if sqlite3_prepare_v2(db, "DELETE FROM files WHERE dir_id = ?", -1, &deleteFiles, nil) == SQLITE_OK {
+                    sqlite3_bind_int64(deleteFiles, 1, id)
+                    sqlite3_step(deleteFiles)
+                }
+                sqlite3_finalize(deleteFiles)
+
+                var deleteDirectory: OpaquePointer?
+                if sqlite3_prepare_v2(db, "DELETE FROM directories WHERE id = ?", -1, &deleteDirectory, nil) == SQLITE_OK {
+                    sqlite3_bind_int64(deleteDirectory, 1, id)
+                    sqlite3_step(deleteDirectory)
+                }
+                sqlite3_finalize(deleteDirectory)
+            }
+        }
+    }
+
     func updateLastScanTime(_ dir: IndexDirectory) {
         dbQueue.sync {
             let sql = "UPDATE directories SET last_scan_time = ? WHERE id = ?"

@@ -166,4 +166,7 @@ final class LocaleManager: ObservableObject {
     func directoryIndexStats(folders: Int, files: Int) -> String {
         isChinese ? "\(folders) 个文件夹，\(files) 个文件" : "\(folders) folders, \(files) files"
     }
+    func directoryAlreadyCovered(path: String) -> String {
+        isChinese ? "该目录已被上级索引目录覆盖: \(path)" : "Directory is already covered by an indexed parent: \(path)"
+    }
 }

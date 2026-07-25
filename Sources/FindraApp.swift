@@ -244,6 +244,8 @@ final class AppState: ObservableObject {
         self.locale = locale
         dbManager.setupDatabase()
         loadDirectories()
+        removeRedundantNestedDirectories()
+        loadDirectories()
         loadExcludedPatterns()
         addDefaultExcludedPatterns()
         updateStats()
@@ -282,8 +284,14 @@ final class AppState: ObservableObject {
     }
 
     func addDirectory(_ path: String, type: DirectoryType) {
+        if directories.contains(where: { path == $0.path || path.hasPrefix($0.path + "/") }) {
+            statusText = locale?.directoryAlreadyCovered(path: path) ?? "Directory is already covered by an indexed parent"
+            return
+        }
+
         let dir = IndexDirectory(path: path, type: type, enabled: true)
         dbManager.addDirectory(dir)
+        dbManager.removeDirectoriesNestedWithin(path)
         loadDirectories()
         if let storedDirectory = directories.first(where: { $0.path == path }) {
             scanDirectory(storedDirectory)
@@ -291,6 +299,13 @@ final class AppState: ObservableObject {
         refreshDirectoryIndexStats()
         updateStats()
         startFSEventWatcher(for: path)
+    }
+
+    private func removeRedundantNestedDirectories() {
+        let sortedDirectories = directories.sorted { $0.path.count < $1.path.count }
+        for directory in sortedDirectories {
+            dbManager.removeDirectoriesNestedWithin(directory.path)
+        }
     }
 
     func removeDirectory(_ dir: IndexDirectory) {
