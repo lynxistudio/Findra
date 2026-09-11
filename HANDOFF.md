@@ -1,6 +1,11 @@
 # Handoff
 
-Last updated: 2026-07-18 06:35 Asia/Singapore
+Last updated: 2026-09-11 16:00 Asia/Singapore
+
+## Project Location
+- Primary working copy: `smb://192.168.50.50/sata1-2/Work/Internal/Findra`
+- macOS mounted path: `/Volumes/sata1-2/Work/Internal/Findra`
+- The former local path `/Users/gray/Documents/Findra` is no longer the active working copy.
 
 ## Current Goal
 - Maintain Findra as an immediate, index-only macOS file search application.
