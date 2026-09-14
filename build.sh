@@ -20,7 +20,7 @@ rm -rf "$OUTPUT_APP"
 # Compile Swift sources into a single Mach-O binary
 echo "--- Compiling Swift sources ---"
 SDK=$(xcrun --show-sdk-path)
-FRAMEWORKS="SwiftUI AppKit Quartz"
+FRAMEWORKS="SwiftUI AppKit Quartz QuickLookThumbnailing AVFoundation"
 FW_FLAGS=""
 for fw in $FRAMEWORKS; do
     FW_FLAGS="$FW_FLAGS -F $SDK/System/Library/Frameworks -framework $fw"
@@ -79,9 +79,9 @@ cat > "$OUTPUT_APP/Contents/Info.plist" << 'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.1.0</string>
+    <string>2.2.0</string>
     <key>CFBundleVersion</key>
-    <string>210</string>
+    <string>220</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>

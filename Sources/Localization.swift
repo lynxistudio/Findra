@@ -169,4 +169,55 @@ final class LocaleManager: ObservableObject {
     func directoryAlreadyCovered(path: String) -> String {
         isChinese ? "该目录已被上级索引目录覆盖: \(path)" : "Directory is already covered by an indexed parent: \(path)"
     }
+
+    // MARK: - Navigation & View Modes
+
+    var back: String {
+        isChinese ? "后退" : "Back"
+    }
+    var forward: String {
+        isChinese ? "前进" : "Forward"
+    }
+    var parentDirectory: String {
+        isChinese ? "上级目录" : "Parent Folder"
+    }
+    var refresh: String {
+        isChinese ? "刷新" : "Refresh"
+    }
+    var listView: String {
+        isChinese ? "列表视图" : "List View"
+    }
+    var gridView: String {
+        isChinese ? "网格视图" : "Grid View"
+    }
+    var thumbnailSize: String {
+        isChinese ? "缩略图大小" : "Thumbnail Size"
+    }
+    var copyPath: String {
+        isChinese ? "拷贝路径" : "Copy Path"
+    }
+    var emptyFolder: String {
+        isChinese ? "此文件夹为空" : "This folder is empty"
+    }
+
+    // MARK: - File Operations & Clipboard
+
+    var cut: String {
+        isChinese ? "剪切" : "Cut"
+    }
+    var paste: String {
+        isChinese ? "粘贴" : "Paste"
+    }
+    func cutFiles(_ count: Int) -> String {
+        isChinese ? "已剪切 \(count) 个文件" : "Cut \(count) file(s)"
+    }
+    func pastedFiles(_ count: Int) -> String {
+        isChinese ? "已粘贴 \(count) 个文件" : "Pasted \(count) file(s)"
+    }
+    func deletedFiles(_ count: Int) -> String {
+        isChinese ? "已移到废纸篓 \(count) 个文件" : "Moved \(count) file(s) to Trash"
+    }
+    func directoryRefreshed(count: Int) -> String {
+        isChinese ? "已刷新，共 \(count) 个项目" : "Refreshed: \(count) item(s)"
+    }
 }

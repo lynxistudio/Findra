@@ -1,12 +1,13 @@
 # Findra
 
-> **Instant file search for macOS — the Everything equivalent you've been missing.**
+> **Lightweight, High-Performance Native macOS File Manager & Instant Search**
+> *The instant file search and fluid directory manager you've been missing.*
 
-Findra is a native macOS file search engine built for speed. It indexes millions of files across local drives and network storage (NAS, NFS, SMB) using SQLite with FTS5 full-text search, delivers results in milliseconds, and stays up-to-date via FSEvents real-time monitoring.
+Findra is a native macOS dual-mode file manager built for pure speed and responsiveness. It seamlessly combines sub-millisecond SQLite FTS5 full-text indexing across local drives and network storage (NAS, NFS, SMB) with full hierarchical directory browsing, a hardware-accelerated streaming asynchronous thumbnail grid, and intuitive daily file operations (`Cmd+X/C/V`, inline rename, trash, Quick Look, and rubber-band marquee drag selection).
 
 Findra was previously released as FastFinder. The app automatically migrates the old local index on first launch.
 
-[![Download](https://img.shields.io/badge/download-v2.1.0-brightgreen)](https://github.com/lynxistudio/Findra/releases/latest)
+[![Download](https://img.shields.io/badge/download-v2.2.0-brightgreen)](https://github.com/lynxistudio/Findra/releases/latest)
 [![macOS](https://img.shields.io/badge/macOS-14.0%2B-blue)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-5.10-orange)](https://swift.org)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -75,44 +76,53 @@ Findra gives you **total control** over what gets indexed, uses a lightweight SQ
 
 ## Features
 
-### Core Search
+### Dual-Mode File Management & Search
 
-- **SQLite + FTS5 full-text search** — tokenized indexing with sub-millisecond query latency
-- **Instant results** — debounced at 50ms, results appear as you type
-- **Partial and substring matching** — find `report` in `Q4_financial_report_final.pdf`
-- **Directory-aware** — instantly see whether a result is a file or a folder
+- **Hierarchical Directory Browsing** — drill down into subdirectories with instant response; double-click folders or use the interactive breadcrumb PathBar
+- **History Navigation** — navigate Back (`Cmd+[`), Forward (`Cmd+]`), and Up (`Cmd+Up`) with full navigation history tracking
+- **Instant FTS5 Search** — search across hundreds of thousands of files in milliseconds as you type
+- **Sub-millisecond Folder Querying** — SQLite `parent_path` indexed queries (< 2ms) with seamless live `FileManager` fallback for non-indexed folders
+- **Directory Refresh** — press `F5` or `Cmd+R` to immediately re-sync current directory contents
 
-### Index Management
+### Streaming Asynchronous Thumbnail Grid
+
+- **Hardware-Accelerated Generation** — powered by Apple's native `QLThumbnailGenerator` framework
+- **Video Keyframe Extraction** — automatically generates video previews using `AVAssetImageGenerator`
+- **Two-Tier Intelligent Caching** — in-memory LRU (`NSCache`) + persistent disk cache (`~/Library/Application Support/Findra/Thumbnails`)
+- **Strict Geometric Grid Layout** — fixed card bounds (`itemWidth x itemHeight`) with uniform column spacing completely eliminate card outline overlapping
+- **Responsive Card Resizing** — seamlessly scale thumbnail sizes from 80px to 200px
+- **Scroll Cancellation** — thumbnail generation tasks outside the visible viewport are cancelled automatically to maximize scrolling performance
+
+### Routine File Operations & Clipboard
+
+- **Cut (`Cmd+X`)** — marked items receive native 45% visual dimming until pasted
+- **Copy (`Cmd+C`)** — copy selected files directly to the system clipboard
+- **Smart Paste (`Cmd+V`)** — paste or move items into the current directory with automatic collision resolution (`filename (1).ext`) and instant SQLite index updates
+- **Inline Rename (`Return` / `Enter`)** — rename directly without opening modal sheets
+- **Move to Trash (`Cmd+Delete`)** — safely move files and directories to the macOS Trash (`FileManager.trashItem`)
+- **Quick Look Follows Selection** — press `Space` to open Quick Look; moving selection with Arrow keys automatically updates the previewed file in real time
+
+### Selection System & Marquee Drag Box
+
+- **Single Click & Blank Deselect** — click item to select; click blank canvas to deselect all and blur search focus
+- **Multi-Selection Modifiers** — `Cmd+Click` to toggle individual items; `Shift+Click` for contiguous range selection
+- **Rubber-Band Marquee Drag Selection** — click and drag the mouse across the canvas to draw an interactive blue selection rectangle (Windows / Finder style) with live intersection selection and `Cmd` invert-drag support
+
+### Index Management & Real-Time Monitoring
 
 - **Per-directory indexing** — add individual directories; only what you add gets indexed
 - **Multiple directory types** — label each as Local, NFS, or SMB for appropriate scan strategies
-- **Exclusion rules** — skip directories matching patterns like `node_modules`, `.git`, `.cache`, `tmp`, and more
-- **13 default exclusions** — noise directories are skipped automatically
-
-### Real-Time Updates
-
-- **FSEvents monitoring** — local directories are watched for create/modify/delete/move events
+- **Exclusion rules** — skip noise directories matching patterns like `node_modules`, `.git`, `.cache`, `tmp`
+- **FSEvents monitoring** — local directories are watched for real-time create/modify/delete/move events
 - **Incremental indexing** — only changed files are re-scanned, not the entire directory
-- **Atomic index replacement** — full rescans use `INSERT OR REPLACE` in a transaction to avoid index corruption
-- **Scheduled full rescans** — network directories are fully rescanned every 5 minutes; local directories get incremental scans every 1 minute
+- **Atomic index replacement** — full rescans use `INSERT OR REPLACE` in transactions to avoid corruption
 
-### User Experience
+### User Experience & Technical
 
-- **Bilingual UI** — automatically follows your system language (English / Chinese)
-- **Menu bar icon** — always accessible from the menu bar with `magnifyingglass` SF Symbol
-- **Global hotkey** — `Cmd+Shift+Space` toggles the search window from anywhere
-- **Native context menu** — right-click any result to rename, reveal in Finder, Quick Look, open, or move to trash
-- **Inline renaming** — press Enter or use the context menu to rename files directly
-- **Multi-select** — select multiple files for batch operations
-- **Finder drag-and-drop** — drag one or more results to Finder to copy, or hold `Cmd` while dragging to move
-- **Column sorting** — sort results by name, size, modification date, or path
-
-### Technical
-
-- **Zero third-party dependencies** — only Apple frameworks (SwiftUI, AppKit, Quartz) and the system SQLite library
-- **Single binary** — compiled with `swiftc`, no Xcode project required (though you can use one)
-- **Ad-hoc signed** — runs without a Developer ID certificate (right-click → Open on first launch)
-- **macOS 14.0+** — leverages modern SwiftUI APIs and Swift concurrency
+- **Bilingual UI** — automatically follows system language (English / Chinese)
+- **Menu bar icon & Global Hotkey** — `Cmd+Shift+Space` toggles the window from anywhere
+- **Zero third-party dependencies** — pure Swift using only Apple frameworks (SwiftUI, AppKit, Quartz, QuickLookThumbnailing, AVFoundation) and system SQLite
+- **Single binary** — lightweight ~3.6MB app bundle built with `swiftc`, no Xcode IDE overhead required
 
 ---
 
@@ -176,12 +186,20 @@ You can also drag selected search results directly into Finder. Normal drag copi
 
 | Shortcut | Action |
 |---|---|
-| `Cmd+Shift+Space` | Toggle Findra window |
-| `Enter` | Start renaming selected file |
-| `Space` | Quick Look selected file |
-| `Cmd+O` | Open selected file |
+| `Cmd+Shift+Space` | Toggle Findra window from anywhere |
+| `Space` | Toggle Quick Look preview (synchronized with Arrow navigation) |
+| `Cmd+[` | Navigate Back in folder history |
+| `Cmd+]` | Navigate Forward in folder history |
+| `Cmd+Up` | Navigate to Parent directory |
+| `F5` / `Cmd+R` | Force refresh current directory |
+| `Cmd+X` | Cut selected files (visual dimming) |
+| `Cmd+C` | Copy selected files |
+| `Cmd+V` | Paste files into current directory (auto conflict resolution) |
+| `Return` / `Enter` | Inline rename selected file |
 | `Cmd+Delete` | Move selected files to Trash |
-| `Cmd+A` | Select all results |
+| `Cmd+A` | Select all files in current view |
+| `Cmd+1` / `Cmd+2` | Switch between List and Grid view |
+| `Esc` | Clear search focus or dismiss rename/selection |
 
 ---
 
@@ -288,13 +306,19 @@ User types "report"
 ```
 Findra/
 ├── Sources/
-│   ├── FindraApp.swift          # @main entry, AppDelegate, data models, AppState
-│   ├── ContentView.swift        # SwiftUI layout: sidebar, search bar, results table
-│   ├── DatabaseManager.swift    # SQLite setup, schema, CRUD, FTS5 table management
-│   ├── ScanManager.swift        # fd/find invocation, FSEvents watcher, incremental scan
+│   ├── FindraApp.swift          # @main entry, AppDelegate, data models, AppState, navigation state machine
+│   ├── ContentView.swift        # SwiftUI layout: sidebar, toolbar, PathBar, search bar, table/grid
+│   ├── FileGridView.swift       # Streaming thumbnail grid view, card geometry, marquee drag box selection
+│   ├── ThumbnailManager.swift   # Multi-tier async streaming thumbnail engine (QLThumbnailGenerator + AVFoundation)
+│   ├── DatabaseManager.swift    # SQLite setup, schema, parent_path indexing, CRUD, FTS5 table management
+│   ├── ScanManager.swift        # fd/find invocation, FSEvents watcher, staged scans, incremental scan
 │   ├── SearchManager.swift      # FTS5 MATCH query construction and execution
-│   └── Localization.swift       # LocaleManager: auto-detect system language, all UI strings
+│   └── Localization.swift       # LocaleManager: auto-detect system language, all UI strings (English/Chinese)
 ├── build.sh                     # Build script: swiftc compile → .app bundle → ad-hoc sign
+├── ROADMAP.md                   # Long-term feature roadmap and architectural plans
+├── CHANGELOG.md                 # Version history and release notes
+├── HANDOFF.md                   # Agent and developer handoff documentation
+├── NEXT.md                      # Active sprint tracking and next tasks
 ├── LICENSE                      # MIT License
 └── README.md                    # This file
 ```

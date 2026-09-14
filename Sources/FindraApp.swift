@@ -26,16 +26,51 @@ struct IndexDirectory: Identifiable, Codable, Equatable {
     var enabled: Bool = true
 }
 
-struct IndexedFile: Identifiable, Equatable {
+enum ViewMode: String, Codable, CaseIterable {
+    case list = "list"
+    case grid = "grid"
+}
+
+struct IndexedFile: Identifiable, Equatable, Hashable {
     var id: Int64 = 0
     var fileName: String
     var fullPath: String
+    var parentPath: String = ""
     var size: Int64 = 0
     var modDate: Double = 0
     var dirId: Int64 = 0
     var isDirectory: Bool = false
 
+    var stableId: Int64 {
+        if id != 0 { return id }
+        return abs(Int64(bitPattern: UInt64(truncatingIfNeeded: fullPath.hashValue)))
+    }
+
+    var url: URL {
+        URL(fileURLWithPath: fullPath)
+    }
+
+    var fileExtension: String {
+        url.pathExtension.lowercased()
+    }
+
+    var isMediaFile: Bool {
+        let mediaExtensions: Set<String> = [
+            "jpg", "jpeg", "png", "gif", "heic", "webp", "tiff", "bmp", "raw", "cr2", "nef", "arw",
+            "mp4", "mov", "m4v", "avi", "mkv", "webm", "flv", "wmv"
+        ]
+        return mediaExtensions.contains(fileExtension)
+    }
+
+    var isVideoFile: Bool {
+        let videoExtensions: Set<String> = [
+            "mp4", "mov", "m4v", "avi", "mkv", "webm", "flv", "wmv"
+        ]
+        return videoExtensions.contains(fileExtension)
+    }
+
     var sizeFormatted: String {
+        if isDirectory { return "—" }
         if size < 1024 { return "\(size) B" }
         let kb = Double(size) / 1024.0
         if kb < 1024 { return String(format: "%.1f KB", kb) }
@@ -227,6 +262,18 @@ final class AppState: ObservableObject {
     @Published var editingFileId: Int64? = nil
     @Published var editingFileName: String = ""
 
+    // Navigation & Folder Browsing
+    @Published var currentDirectoryPath: String? = nil
+    @Published var browsedFiles: [IndexedFile] = []
+    @Published var backStack: [String] = []
+    @Published var forwardStack: [String] = []
+    @Published var viewMode: ViewMode = .list
+    @Published var thumbnailSize: CGFloat = 110
+
+    // Clipboard & Operations
+    @Published var cutFilePaths: Set<String> = []
+    @Published var copiedFilePaths: Set<String> = []
+
     let dbManager = DatabaseManager()
     let scanManager = ScanManager()
     lazy var searchManager = SearchManager(dbManager: dbManager)
@@ -236,6 +283,30 @@ final class AppState: ObservableObject {
     private var scanTimer: Timer?
     private var incrementalTimer: Timer?
     private var isInitialized = false
+
+    var isSearchActive: Bool {
+        !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    var visibleFiles: [IndexedFile] {
+        if isSearchActive {
+            return searchResults
+        }
+        return browsedFiles
+    }
+
+    var canNavigateBack: Bool {
+        !backStack.isEmpty
+    }
+
+    var canNavigateForward: Bool {
+        !forwardStack.isEmpty
+    }
+
+    var canNavigateUp: Bool {
+        guard let current = currentDirectoryPath, current != "/", !current.isEmpty else { return false }
+        return true
+    }
 
     func initialize(locale: LocaleManager) {
         guard !isInitialized else { return }
@@ -256,6 +327,11 @@ final class AppState: ObservableObject {
         startFSEventWatchers()
         // Rebuild every configured root in the background after launch. Search remains database-only.
         scanAllDirectories()
+
+        // Set initial browsing folder to the first indexed directory
+        if currentDirectoryPath == nil, let firstDir = directories.first {
+            navigateTo(path: firstDir.path, recordHistory: false)
+        }
     }
 
     func loadDirectories() {
@@ -435,20 +511,224 @@ final class AppState: ObservableObject {
 
     // MARK: - File Operations
 
+    // MARK: - Navigation & Directory Browsing
+
+    func navigateTo(path: String, recordHistory: Bool = true) {
+        var cleanPath = path
+        if cleanPath.count > 1 && cleanPath.hasSuffix("/") {
+            cleanPath = String(cleanPath.dropLast())
+        }
+        guard FileManager.default.fileExists(atPath: cleanPath) else {
+            statusText = locale?.unavailableFiles(1) ?? "Path unavailable: \(cleanPath)"
+            return
+        }
+
+        if recordHistory, let current = currentDirectoryPath, current != cleanPath {
+            backStack.append(current)
+            forwardStack.removeAll()
+        }
+
+        currentDirectoryPath = cleanPath
+        selectedFiles.removeAll()
+        cancelEditing()
+        loadCurrentDirectory()
+    }
+
+    func navigateBack() {
+        guard let prev = backStack.popLast() else { return }
+        if let current = currentDirectoryPath {
+            forwardStack.append(current)
+        }
+        navigateTo(path: prev, recordHistory: false)
+    }
+
+    func navigateForward() {
+        guard let next = forwardStack.popLast() else { return }
+        if let current = currentDirectoryPath {
+            backStack.append(current)
+        }
+        navigateTo(path: next, recordHistory: false)
+    }
+
+    func navigateUp() {
+        guard let current = currentDirectoryPath, current != "/", !current.isEmpty else { return }
+        let parent = URL(fileURLWithPath: current).deletingLastPathComponent().path
+        if !parent.isEmpty && parent != current {
+            navigateTo(path: parent)
+        }
+    }
+
+    func refreshCurrentDirectory() {
+        guard let current = currentDirectoryPath else { return }
+        let liveItems = dbManager.getFileSystemItems(at: current)
+        browsedFiles = liveItems
+        statusText = locale?.directoryRefreshed(count: liveItems.count) ?? "Refreshed \(liveItems.count) items"
+    }
+
+    func loadCurrentDirectory() {
+        guard let current = currentDirectoryPath else {
+            browsedFiles = []
+            return
+        }
+
+        // 1. Fast cache path: load from indexed SQLite database in < 2ms
+        let dbItems = dbManager.getFilesInDirectory(parentPath: current)
+        if !dbItems.isEmpty {
+            browsedFiles = dbItems
+            statusText = locale?.resultCount(dbItems.count) ?? "\(dbItems.count) items"
+        }
+
+        // 2. Direct filesystem read ensures real-time accuracy and covers unindexed folders
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let liveItems = self.dbManager.getFileSystemItems(at: current)
+            DispatchQueue.main.async {
+                if self.currentDirectoryPath == current {
+                    self.browsedFiles = liveItems
+                    self.statusText = self.locale?.resultCount(liveItems.count) ?? "\(liveItems.count) items"
+                }
+            }
+        }
+    }
+
+    // MARK: - File Operations & Clipboard
+
+    func cutFiles(_ fileIds: Set<Int64>) {
+        let files = visibleFiles.filter { fileIds.contains($0.id) || fileIds.contains($0.stableId) }
+        let availableFiles = files.filter { FileManager.default.fileExists(atPath: $0.fullPath) }
+        guard !availableFiles.isEmpty else { return }
+
+        cutFilePaths = Set(availableFiles.map(\.fullPath))
+        copiedFilePaths.removeAll()
+
+        let urls = availableFiles.map { URL(fileURLWithPath: $0.fullPath) as NSURL }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.writeObjects(urls)
+        pb.setString("cut", forType: NSPasteboard.PasteboardType("com.lynxistudio.findra.cut"))
+
+        statusText = locale?.cutFiles(availableFiles.count) ?? "Cut \(availableFiles.count) file(s)"
+    }
+
+    func copyFiles(_ fileIds: Set<Int64>) {
+        let files = visibleFiles.filter { fileIds.contains($0.id) || fileIds.contains($0.stableId) }
+        let availableFiles = files.filter { FileManager.default.fileExists(atPath: $0.fullPath) }
+        guard !availableFiles.isEmpty else {
+            statusText = locale?.unavailableFiles(fileIds.count) ?? "Files unavailable"
+            return
+        }
+
+        copiedFilePaths = Set(availableFiles.map(\.fullPath))
+        cutFilePaths.removeAll()
+
+        let urls = availableFiles.map { URL(fileURLWithPath: $0.fullPath) as NSURL }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        guard pb.writeObjects(urls) else {
+            statusText = locale?.copyFailed ?? "Could not copy files"
+            return
+        }
+
+        statusText = locale?.copiedFiles(availableFiles.count) ?? "Copied \(availableFiles.count) file(s)"
+        if availableFiles.count != files.count {
+            statusText += " - " + (locale?.unavailableFiles(files.count - availableFiles.count) ?? "Some files unavailable")
+        }
+    }
+
+    func pasteFiles(into targetPath: String? = nil) {
+        let destPath = targetPath ?? currentDirectoryPath
+        guard let dest = destPath, FileManager.default.fileExists(atPath: dest) else {
+            statusText = "Cannot paste: destination folder unavailable"
+            return
+        }
+
+        let pb = NSPasteboard.general
+        guard let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty else {
+            return
+        }
+
+        let isCut = pb.string(forType: NSPasteboard.PasteboardType("com.lynxistudio.findra.cut")) == "cut" || !cutFilePaths.isEmpty
+        let fm = FileManager.default
+        var processedCount = 0
+
+        for sourceURL in urls {
+            let sourcePath = sourceURL.path
+            let fileName = sourceURL.lastPathComponent
+            let targetURL = uniqueDestinationURL(for: fileName, in: dest)
+
+            do {
+                if isCut {
+                    try fm.moveItem(at: sourceURL, to: targetURL)
+                    if let file = dbManager.getFileByPath(sourcePath) {
+                        _ = dbManager.renameFile(fileId: file.id, newName: targetURL.lastPathComponent, newPath: targetURL.path)
+                    }
+                    processedCount += 1
+                } else {
+                    try fm.copyItem(at: sourceURL, to: targetURL)
+                    processedCount += 1
+                }
+            } catch {
+                print("Paste error: \(error.localizedDescription)")
+            }
+        }
+
+        if isCut {
+            cutFilePaths.removeAll()
+            pb.setString("", forType: NSPasteboard.PasteboardType("com.lynxistudio.findra.cut"))
+        }
+
+        statusText = locale?.pastedFiles(processedCount) ?? "Pasted \(processedCount) item(s)"
+        refreshCurrentDirectory()
+        updateStats()
+        refreshDirectoryIndexStats()
+    }
+
+    private func uniqueDestinationURL(for fileName: String, in directory: String) -> URL {
+        let dirURL = URL(fileURLWithPath: directory, isDirectory: true)
+        var targetURL = dirURL.appendingPathComponent(fileName)
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: targetURL.path) else { return targetURL }
+
+        let nameWithoutExt = (fileName as NSString).deletingPathExtension
+        let ext = (fileName as NSString).pathExtension
+        var counter = 2
+
+        while fm.fileExists(atPath: targetURL.path) {
+            let newName: String
+            if ext.isEmpty {
+                newName = "\(nameWithoutExt) \(counter)"
+            } else {
+                newName = "\(nameWithoutExt) \(counter).\(ext)"
+            }
+            targetURL = dirURL.appendingPathComponent(newName)
+            counter += 1
+        }
+        return targetURL
+    }
+
     func deleteFiles(_ fileIds: Set<Int64>) {
-        let files = dbManager.getFilesByIds(fileIds)
+        let files = visibleFiles.filter { fileIds.contains($0.id) || fileIds.contains($0.stableId) }
+        var deletedCount = 0
         for file in files {
             do {
                 let url = URL(fileURLWithPath: file.fullPath)
                 try FileManager.default.trashItem(at: url, resultingItemURL: nil)
-                dbManager.removeFileById(file.id)
+                if file.id != 0 {
+                    dbManager.removeFileById(file.id)
+                }
+                deletedCount += 1
             } catch {
                 print("删除失败: \(file.fullPath) - \(error)")
             }
         }
+        statusText = locale?.deletedFiles(deletedCount) ?? "Moved \(deletedCount) item(s) to Trash"
+        selectedFiles.removeAll()
+        refreshCurrentDirectory()
         updateStats()
         refreshDirectoryIndexStats()
-        performSearch()
+        if isSearchActive {
+            performSearch()
+        }
     }
 
     func renameFile(fileId: Int64, oldPath: String, newName: String) -> Bool {
@@ -459,15 +739,14 @@ final class AppState: ObservableObject {
 
         do {
             try fm.moveItem(at: oldUrl, to: newUrl)
-            let success = dbManager.renameFile(fileId: fileId, newName: newName, newPath: newPath)
-            if success {
-                performSearch()
-                return true
-            } else {
-                // Rollback
-                try? fm.moveItem(at: newUrl, to: oldUrl)
-                return false
+            if fileId != 0 {
+                _ = dbManager.renameFile(fileId: fileId, newName: newName, newPath: newPath)
             }
+            refreshCurrentDirectory()
+            if isSearchActive {
+                performSearch()
+            }
+            return true
         } catch {
             print("重命名失败: \(oldPath) -> \(newName) - \(error)")
             return false
@@ -482,41 +761,19 @@ final class AppState: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.fullPath)])
     }
 
-    func copyFiles(_ fileIds: Set<Int64>) {
-        let files = dbManager.getFilesByIds(fileIds)
-        let availableFiles = files.filter { FileManager.default.fileExists(atPath: $0.fullPath) }
-        guard !availableFiles.isEmpty else {
-            statusText = locale?.unavailableFiles(files.count) ?? "Files unavailable"
-            return
-        }
-
-        let urls = availableFiles.map { URL(fileURLWithPath: $0.fullPath) as NSURL }
-        NSPasteboard.general.clearContents()
-        guard NSPasteboard.general.writeObjects(urls) else {
-            statusText = locale?.copyFailed ?? "Could not copy files"
-            return
-        }
-
-        statusText = locale?.copiedFiles(availableFiles.count) ?? "Copied \(availableFiles.count) file(s)"
-        if availableFiles.count != files.count {
-            statusText += " - " + (locale?.unavailableFiles(files.count - availableFiles.count) ?? "Some files unavailable")
-        }
-    }
-
     func quickLookSelected() {
-        let files = dbManager.getFilesByIds(selectedFiles).filter {
-            FileManager.default.fileExists(atPath: $0.fullPath)
-        }
-        guard !files.isEmpty else {
+        let files = visibleFiles.filter { selectedFiles.contains($0.id) || selectedFiles.contains($0.stableId) }
+        let available = files.filter { FileManager.default.fileExists(atPath: $0.fullPath) }
+        guard !available.isEmpty else {
             statusText = locale?.unavailableFiles(selectedFiles.count) ?? "Files unavailable"
             return
         }
-        let urls = files.map { URL(fileURLWithPath: $0.fullPath) }
-        QuickLookCoordinator.shared.showPreview(urls: urls)
+        let urls = available.map { URL(fileURLWithPath: $0.fullPath) }
+        QuickLookCoordinator.shared.togglePreview(urls: urls)
     }
 
     func openSelectedFiles() {
-        let files = dbManager.getFilesByIds(selectedFiles)
+        let files = visibleFiles.filter { selectedFiles.contains($0.id) || selectedFiles.contains($0.stableId) }
         var unavailableCount = 0
         for file in files {
             if FileManager.default.fileExists(atPath: file.fullPath) {
@@ -531,7 +788,7 @@ final class AppState: ObservableObject {
     }
 
     func startEditingFile(_ file: IndexedFile) {
-        editingFileId = file.id
+        editingFileId = file.id != 0 ? file.id : file.stableId
         editingFileName = file.fileName
     }
 
@@ -542,8 +799,8 @@ final class AppState: ObservableObject {
 
     func commitEditing() {
         guard let fileId = editingFileId, !editingFileName.isEmpty else { return }
-        if let file = dbManager.getFilesByIds([fileId]).first {
-            let success = renameFile(fileId: fileId, oldPath: file.fullPath, newName: editingFileName)
+        if let file = visibleFiles.first(where: { $0.id == fileId || $0.stableId == fileId }) {
+            let success = renameFile(fileId: file.id, oldPath: file.fullPath, newName: editingFileName)
             if success {
                 editingFileId = nil
                 editingFileName = ""

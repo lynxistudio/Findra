@@ -63,7 +63,7 @@ final class ScanManager {
             return DirectoryScanResult(count: 0, errorMessage: "Could not enumerate indexed directory", isAlreadyRunning: false)
         }
 
-        var batch: [(fileName: String, fullPath: String, size: Int64, modDate: Double, isDirectory: Bool)] = []
+        var batch: [(fileName: String, fullPath: String, parentPath: String, size: Int64, modDate: Double, isDirectory: Bool)] = []
         var entryCount = 0
         var stagingFailed = false
 
@@ -91,9 +91,11 @@ final class ScanManager {
                 let isRegularFile = values.isRegularFile == true
                 guard isDirectory || isRegularFile else { continue }
 
+                let parentPath = url.deletingLastPathComponent().path
                 batch.append((
                     fileName: url.lastPathComponent,
                     fullPath: url.path,
+                    parentPath: parentPath,
                     size: isDirectory ? 0 : Int64(values.fileSize ?? 0),
                     modDate: values.contentModificationDate?.timeIntervalSince1970 ?? 0,
                     isDirectory: isDirectory
@@ -196,7 +198,8 @@ final class ScanManager {
             }
             let excludedPatterns = dbManager.getAllExcludedPatterns()
             if !isPathExcluded(path, relativeTo: dir.path, excludedPatterns: excludedPatterns) {
-                dbManager.insertFilesBatch([(fileName: fileName, fullPath: path, size: size, modDate: modDate, dirId: dir.id, isDirectory: isDirectory)])
+                let parentPath = URL(fileURLWithPath: path).deletingLastPathComponent().path
+                dbManager.insertFilesBatch([(fileName: fileName, fullPath: path, parentPath: parentPath, size: size, modDate: modDate, dirId: dir.id, isDirectory: isDirectory)])
             }
         } else {
             dbManager.deleteByPath(path)
