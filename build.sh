@@ -7,7 +7,7 @@ set -e
 APP_NAME="Findra"
 BUILD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="$BUILD_DIR/Sources"
-OUTPUT_APP="${OUTPUT_APP:-$HOME/Desktop/Findra.app}"
+OUTPUT_APP="${OUTPUT_APP:-/Applications/Findra.app}"
 ICNS_PATH="$BUILD_DIR/AppIcon.icns"
 
 echo "=== Findra Build ==="
