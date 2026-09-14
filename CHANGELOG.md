@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-09-14
+- Enabled dynamic Quick Look (Space preview) following mouse selection clicks in list and grid views, matching macOS Finder behavior: clicking on another file seamlessly switches preview without closing or flickering the preview window; clearing selection closes preview.
 - Fixed repeated disk/folder permission dialogs across app updates by anchoring a permanent designated requirement (`com.lynxistudio.findra`) and formal macOS usage descriptions (`NSDocumentsFolderUsageDescription`, `NSDownloadsFolderUsageDescription`, `NSRemovableVolumesUsageDescription`, `NSNetworkVolumesUsageDescription`).
 - Fixed silent background startup: window now automatically activates to frontmost (`NSApp.activate(ignoringOtherApps: true)`) and centers itself upon launch instead of lingering unfocused or hidden behind other active windows.
 - Compacted and repositioned directory sorting button: neatly grouped on the trailing side next to the List/Grid view switcher with `.fixedSize()` constraint, preventing awkward middle-toolbar spreading and maintaining macOS-standard toolbar rhythm.

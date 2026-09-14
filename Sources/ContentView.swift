@@ -81,6 +81,18 @@ struct ContentView: View {
             let visibleIds = Set(files.map { $0.id != 0 ? $0.id : $0.stableId })
             appState.selectedFiles.formIntersection(visibleIds)
         }
+        .onChange(of: appState.selectedFiles) { _, newSelection in
+            guard QuickLookCoordinator.shared.isPreviewVisible else { return }
+            if newSelection.isEmpty {
+                QuickLookCoordinator.shared.closePreview()
+                return
+            }
+            let files = appState.visibleFiles.filter { newSelection.contains($0.id) || newSelection.contains($0.stableId) }
+            let available = files.filter { FileManager.default.fileExists(atPath: $0.fullPath) }
+            if !available.isEmpty {
+                QuickLookCoordinator.shared.updatePreview(urls: available.map { URL(fileURLWithPath: $0.fullPath) })
+            }
+        }
     }
 
     // MARK: - Directory Sidebar
@@ -1180,7 +1192,8 @@ final class QuickLookCoordinator: NSObject, QLPreviewPanelDataSource {
 
     func showPreview(urls: [URL]) {
         guard !urls.isEmpty, let panel = QLPreviewPanel.shared() else { return }
-        if NSApp.keyWindow !== panel {
+        let wasVisible = isPreviewVisible
+        if !wasVisible && NSApp.keyWindow !== panel {
             previousKeyWindow = NSApp.keyWindow
         }
         self.panel = panel
@@ -1188,7 +1201,18 @@ final class QuickLookCoordinator: NSObject, QLPreviewPanelDataSource {
         panel.dataSource = self
         panel.reloadData()
         panel.currentPreviewItemIndex = 0
-        panel.makeKeyAndOrderFront(nil)
+        if !wasVisible {
+            panel.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    func updatePreview(urls: [URL]) {
+        guard isPreviewVisible, !urls.isEmpty, let panel = panel ?? QLPreviewPanel.shared() else { return }
+        self.panel = panel
+        previewURLs = urls
+        panel.dataSource = self
+        panel.reloadData()
+        panel.currentPreviewItemIndex = 0
     }
 
     func togglePreview(urls: [URL]) {
