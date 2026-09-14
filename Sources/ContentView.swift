@@ -631,11 +631,13 @@ struct ContentView: View {
     func resultsTable(for files: [IndexedFile]) -> some View {
         Table(files, selection: $appState.selectedFiles, sortOrder: $sortOrder) {
             TableColumn(locale.tableFileName, value: \.fileName) { file in
+                let fileKey = file.id != 0 ? file.id : file.stableId
+                let isEditingThis = appState.editingFileId == fileKey
                 HStack(spacing: 6) {
                     FileIconView(filePath: file.fullPath, fileName: file.fileName, isDirectory: file.isDirectory)
                         .frame(width: 18, height: 18)
 
-                    if appState.editingFileId == file.id || (file.id == 0 && appState.editingFileId == file.stableId) {
+                    if isEditingThis {
                         TextField("", text: $appState.editingFileName)
                             .textFieldStyle(.plain)
                             .font(.system(size: 13))
@@ -652,11 +654,18 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .opacity(appState.cutFilePaths.contains(file.fullPath) ? 0.45 : 1.0)
                 .overlay {
-                    if appState.editingFileId != file.id {
-                        FinderDragSourceOverlay(
+                    if !isEditingThis {
+                        FileDragSourceOverlay(
                             file: file,
                             selectedIds: $appState.selectedFiles,
-                            visibleFiles: files
+                            visibleFiles: files,
+                            onDoubleClick: {
+                                if file.isDirectory {
+                                    appState.navigateTo(path: file.fullPath)
+                                } else {
+                                    NSWorkspace.shared.open(file.url)
+                                }
+                            }
                         )
                     }
                 }
@@ -1016,138 +1025,6 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Finder Drag Source
-
-struct FinderDragSourceOverlay: NSViewRepresentable {
-    let file: IndexedFile
-    @Binding var selectedIds: Set<Int64>
-    let visibleFiles: [IndexedFile]
-
-    func makeNSView(context: Context) -> FinderDragSourceView {
-        FinderDragSourceView()
-    }
-
-    func updateNSView(_ nsView: FinderDragSourceView, context: Context) {
-        nsView.file = file
-        nsView.selectedIds = $selectedIds
-        nsView.visibleFiles = visibleFiles
-    }
-}
-
-final class FinderDragSourceView: NSView, NSDraggingSource {
-    var file: IndexedFile?
-    var selectedIds: Binding<Set<Int64>> = .constant([])
-    var visibleFiles: [IndexedFile] = []
-
-    private var mouseDownLocation: NSPoint?
-    private var armedSelectedIds: Set<Int64> = []
-    private var armedVisibleFiles: [IndexedFile] = []
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        if let event = NSApp.currentEvent {
-            let isRightClick = event.type == .rightMouseDown
-            let isControlClick = event.type == .leftMouseDown && event.modifierFlags.contains(.control)
-            if isRightClick || isControlClick {
-                return nil
-            }
-        }
-        return bounds.contains(point) ? self : nil
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        guard let file else { return }
-        mouseDownLocation = convert(event.locationInWindow, from: nil)
-        updateSelection(for: file, event: event)
-        armedSelectedIds = selectedIds.wrappedValue
-        armedVisibleFiles = visibleFiles
-        focusEnclosingTable()
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        guard let file, let start = mouseDownLocation else { return }
-        let location = convert(event.locationInWindow, from: nil)
-        let distance = hypot(location.x - start.x, location.y - start.y)
-        guard distance >= 3 else { return }
-
-        beginFinderDrag(for: file, with: event)
-        resetArmedDrag()
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        resetArmedDrag()
-    }
-
-    private func updateSelection(for file: IndexedFile, event: NSEvent) {
-        let fileKey = file.id != 0 ? file.id : file.stableId
-        if event.modifierFlags.contains(.command) {
-            if selectedIds.wrappedValue.contains(fileKey) {
-                selectedIds.wrappedValue.remove(fileKey)
-            } else {
-                selectedIds.wrappedValue.insert(fileKey)
-            }
-        } else if !selectedIds.wrappedValue.contains(fileKey) {
-            selectedIds.wrappedValue = [fileKey]
-        }
-    }
-
-    private func beginFinderDrag(for file: IndexedFile, with event: NSEvent) {
-        let fileKey = file.id != 0 ? file.id : file.stableId
-        let files: [IndexedFile]
-        let dragSelectedIds = armedSelectedIds
-        let dragVisibleFiles = armedVisibleFiles.isEmpty ? visibleFiles : armedVisibleFiles
-
-        if dragSelectedIds.contains(fileKey) {
-            files = dragVisibleFiles.filter { dragSelectedIds.contains($0.id != 0 ? $0.id : $0.stableId) }
-        } else {
-            files = [file]
-        }
-
-        let urls = files
-            .filter { FileManager.default.fileExists(atPath: $0.fullPath) }
-            .map { URL(fileURLWithPath: $0.fullPath) }
-        guard !urls.isEmpty else { return }
-
-        let dragPoint = convert(event.locationInWindow, from: nil)
-        let items = urls.enumerated().map { index, url in
-            let item = NSDraggingItem(pasteboardWriter: url as NSURL)
-            let icon = NSWorkspace.shared.icon(forFile: url.path)
-            icon.size = NSSize(width: 32, height: 32)
-            let offset = CGFloat(min(index, 4)) * 2
-            let frame = NSRect(x: dragPoint.x - 16 + offset, y: dragPoint.y - 16 - offset, width: 32, height: 32)
-            item.setDraggingFrame(frame, contents: icon)
-            return item
-        }
-
-        let session = beginDraggingSession(with: items, event: event, source: self)
-        session.animatesToStartingPositionsOnCancelOrFail = true
-        session.draggingFormation = .stack
-    }
-
-    private func resetArmedDrag() {
-        mouseDownLocation = nil
-        armedSelectedIds = []
-        armedVisibleFiles = []
-    }
-
-    private func focusEnclosingTable() {
-        var view: NSView? = self
-        while let current = view {
-            if let tableView = current as? NSTableView {
-                window?.makeFirstResponder(tableView)
-                return
-            }
-            view = current.superview
-        }
-    }
-
-    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        .copy
-    }
-
-    func ignoreModifierKeys(for session: NSDraggingSession) -> Bool {
-        false
-    }
-}
 
 // MARK: - File Icon View
 

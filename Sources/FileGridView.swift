@@ -71,11 +71,13 @@ struct FileGridView: View {
                         let fileKey = file.id != 0 ? file.id : file.stableId
                         let isSelected = selectedIds.contains(fileKey)
 
+                        let isEditing = appState.editingFileId == file.id || (file.id == 0 && appState.editingFileId == file.stableId)
+
                         ThumbnailCardView(
                             file: file,
                             isSelected: isSelected,
                             isCut: appState.cutFilePaths.contains(file.fullPath),
-                            isEditing: appState.editingFileId == file.id || (file.id == 0 && appState.editingFileId == file.stableId),
+                            isEditing: isEditing,
                             editingText: $appState.editingFileName,
                             cardSize: cardSize,
                             itemWidth: itemWidth,
@@ -92,20 +94,24 @@ struct FileGridView: View {
                             }
                         )
                         .contentShape(Rectangle())
-                        .onTapGesture(count: 2) {
-                            if let onDoubleClick = onDoubleClick {
-                                onDoubleClick(file)
-                            } else if file.isDirectory {
-                                appState.navigateTo(path: file.fullPath)
-                            } else {
-                                NSWorkspace.shared.open(URL(fileURLWithPath: file.fullPath))
+                        .overlay {
+                            if !isEditing {
+                                FileDragSourceOverlay(
+                                    file: file,
+                                    selectedIds: $selectedIds,
+                                    visibleFiles: files,
+                                    onDoubleClick: {
+                                        if let onDoubleClick = onDoubleClick {
+                                            onDoubleClick(file)
+                                        } else if file.isDirectory {
+                                            appState.navigateTo(path: file.fullPath)
+                                        } else {
+                                            NSWorkspace.shared.open(URL(fileURLWithPath: file.fullPath))
+                                        }
+                                    }
+                                )
                             }
                         }
-                        .simultaneousGesture(
-                            TapGesture().onEnded {
-                                handleSelection(for: file)
-                            }
-                        )
                         .contextMenu {
                             let currentSelection = selectedIds.isEmpty ? [fileKey] : selectedIds
                             cardContextMenu(for: currentSelection)

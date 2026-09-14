@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-09-14
+- Added full native macOS file drag-and-drop support (`NSDraggingSession`) to external applications: users can now drag single or multi-selected files directly from both Grid and Table views to other apps (Finder, Desktop, WeChat, Photoshop, VSCode, Chrome, Terminal, Trash, etc.), with native 48x48 icon drag stacks, count badges, and `[.copy, .generic, .move]` operation permissions. Preserves marquee box selection when dragging on empty grid canvas.
 - Eliminated macOS spinning wheel (beachball) freeze during and after file deletion: completely offloaded synchronous directory enumeration (`refreshCurrentDirectory`), database aggregation stat queries (`getTotalFileCount`, `getDirectoryIndexStats`), file paste copying (`pasteFiles`), and full-text search sorting from the main thread to background utility/user-initiated queues.
 - Fixed UI freeze when deleting/trashing large files on external drives or network volumes: file deletion operations (`trashItem` / `removeItem`) now run entirely on asynchronous background I/O threads with instant optimistic UI removal, eliminating spinning wheel / beachball freezes.
 - Added instant "Delete Immediately" (`Option+Cmd+Delete`) and context menu option for external drives, bypassing slow cross-volume trash copying for large files.
