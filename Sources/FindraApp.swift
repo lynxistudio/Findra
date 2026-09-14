@@ -807,28 +807,56 @@ final class AppState: ObservableObject {
         return targetURL
     }
 
-    func deleteFiles(_ fileIds: Set<Int64>) {
+    func deleteFiles(_ fileIds: Set<Int64>, immediately: Bool = false) {
         let files = visibleFiles.filter { fileIds.contains($0.id) || fileIds.contains($0.stableId) }
-        var deletedCount = 0
-        for file in files {
-            do {
+        guard !files.isEmpty else { return }
+
+        let count = files.count
+        let fileIdSet = Set(files.map { $0.id != 0 ? $0.id : $0.stableId })
+
+        // 1. Optimistic UI update: instantly clear selection and remove items from current view
+        selectedFiles.subtract(fileIdSet)
+        browsedFiles.removeAll(where: { fileIdSet.contains($0.id != 0 ? $0.id : $0.stableId) })
+        searchResults.removeAll(where: { fileIdSet.contains($0.id != 0 ? $0.id : $0.stableId) })
+        statusText = immediately ? (locale?.deletingFiles(count) ?? "Deleting \(count) items...") : (locale?.trashingFiles(count) ?? "Moving \(count) items to Trash...")
+
+        // 2. Asynchronous execution in background queue to avoid freezing UI
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            var successfulCount = 0
+            let fm = FileManager.default
+
+            for file in files {
                 let url = URL(fileURLWithPath: file.fullPath)
-                try FileManager.default.trashItem(at: url, resultingItemURL: nil)
-                if file.id != 0 {
-                    dbManager.removeFileById(file.id)
+                do {
+                    if immediately {
+                        try fm.removeItem(at: url)
+                    } else {
+                        try fm.trashItem(at: url, resultingItemURL: nil)
+                    }
+                    if file.id != 0 {
+                        self.dbManager.removeFileById(file.id)
+                    }
+                    successfulCount += 1
+                } catch {
+                    print("Delete failed: \(file.fullPath) - \(error)")
                 }
-                deletedCount += 1
-            } catch {
-                print("删除失败: \(file.fullPath) - \(error)")
             }
-        }
-        statusText = locale?.deletedFiles(deletedCount) ?? "Moved \(deletedCount) item(s) to Trash"
-        selectedFiles.removeAll()
-        refreshCurrentDirectory()
-        updateStats()
-        refreshDirectoryIndexStats()
-        if isSearchActive {
-            performSearch()
+
+            DispatchQueue.main.async {
+                self.updateStats()
+                self.refreshDirectoryIndexStats()
+                if immediately {
+                    self.statusText = self.locale?.permanentlyDeletedFiles(successfulCount) ?? "Permanently deleted \(successfulCount) file(s)"
+                } else {
+                    self.statusText = self.locale?.deletedFiles(successfulCount) ?? "Moved \(successfulCount) item(s) to Trash"
+                }
+                // Refresh to sync any actual filesystem differences
+                self.refreshCurrentDirectory()
+                if self.isSearchActive {
+                    self.performSearch()
+                }
+            }
         }
     }
 

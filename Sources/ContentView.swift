@@ -765,14 +765,16 @@ struct ContentView: View {
             }
             Button(locale.showInFinder) { appState.revealInFinder(single) }
             Divider()
-            Button(locale.moveToTrash, role: .destructive) { appState.deleteFiles(ids) }
+            Button(locale.moveToTrash, role: .destructive) { appState.deleteFiles(ids, immediately: false) }
+            Button(locale.deleteImmediately, role: .destructive) { appState.deleteFiles(ids, immediately: true) }
         } else if !ids.isEmpty {
             Button(locale.copy) { appState.copyFiles(ids) }
             Button(locale.cut) { appState.cutFiles(ids) }
             Button(locale.quickLook) { quickLookFiles(targetFiles) }
             Button(locale.open) { openFiles(targetFiles) }
             Divider()
-            Button(locale.moveToTrash, role: .destructive) { appState.deleteFiles(ids) }
+            Button(locale.moveToTrash, role: .destructive) { appState.deleteFiles(ids, immediately: false) }
+            Button(locale.deleteImmediately, role: .destructive) { appState.deleteFiles(ids, immediately: true) }
         } else {
             Button(locale.paste) { appState.pasteFiles() }
             Button(locale.refresh) { appState.refreshCurrentDirectory() }
@@ -926,10 +928,17 @@ struct ContentView: View {
                 return nil
             }
 
+            // Cmd+Option+Delete (Delete Immediately) - KeyCode 51
+            if modifiers.contains(.command), modifiers.contains(.option), event.keyCode == 51 {
+                guard !appState.selectedFiles.isEmpty else { return event }
+                appState.deleteFiles(appState.selectedFiles, immediately: true)
+                return nil
+            }
+
             // Cmd+Delete (Move to Trash) - KeyCode 51
             if modifiers == [.command], event.keyCode == 51 {
                 guard !appState.selectedFiles.isEmpty else { return event }
-                appState.deleteFiles(appState.selectedFiles)
+                appState.deleteFiles(appState.selectedFiles, immediately: false)
                 return nil
             }
 

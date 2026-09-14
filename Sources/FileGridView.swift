@@ -237,7 +237,8 @@ struct FileGridView: View {
             }
             Button(locale.showInFinder) { appState.revealInFinder(single) }
             Divider()
-            Button(locale.moveToTrash, role: .destructive) { appState.deleteFiles(selectedIds) }
+            Button(locale.moveToTrash, role: .destructive) { appState.deleteFiles(selectedIds, immediately: false) }
+            Button(locale.deleteImmediately, role: .destructive) { appState.deleteFiles(selectedIds, immediately: true) }
         } else if !targetFiles.isEmpty {
             Button(locale.quickLook) {
                 let urls = targetFiles.map { URL(fileURLWithPath: $0.fullPath) }
@@ -247,7 +248,8 @@ struct FileGridView: View {
             Button(locale.copy) { appState.copyFiles(selectedIds) }
             Button(locale.cut) { appState.cutFiles(selectedIds) }
             Divider()
-            Button(locale.moveToTrash, role: .destructive) { appState.deleteFiles(selectedIds) }
+            Button(locale.moveToTrash, role: .destructive) { appState.deleteFiles(selectedIds, immediately: false) }
+            Button(locale.deleteImmediately, role: .destructive) { appState.deleteFiles(selectedIds, immediately: true) }
         }
     }
 }

@@ -1,6 +1,8 @@
 # Changelog
 
 ## 2026-09-14
+- Fixed UI freeze when deleting/trashing large files on external drives or network volumes: file deletion operations (`trashItem` / `removeItem`) now run entirely on asynchronous background I/O threads with instant optimistic UI removal, eliminating spinning wheel / beachball freezes.
+- Added instant "Delete Immediately" (`Option+Cmd+Delete`) and context menu option for external drives, bypassing slow cross-volume trash copying for large files.
 - Enabled dynamic Quick Look (Space preview) following mouse selection clicks in list and grid views, matching macOS Finder behavior: clicking on another file seamlessly switches preview without closing or flickering the preview window; clearing selection closes preview.
 - Fixed repeated disk/folder permission dialogs across app updates by anchoring a permanent designated requirement (`com.lynxistudio.findra`) and formal macOS usage descriptions (`NSDocumentsFolderUsageDescription`, `NSDownloadsFolderUsageDescription`, `NSRemovableVolumesUsageDescription`, `NSNetworkVolumesUsageDescription`).
 - Fixed silent background startup: window now automatically activates to frontmost (`NSApp.activate(ignoringOtherApps: true)`) and centers itself upon launch instead of lingering unfocused or hidden behind other active windows.

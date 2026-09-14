@@ -214,8 +214,20 @@ final class LocaleManager: ObservableObject {
     func pastedFiles(_ count: Int) -> String {
         isChinese ? "已粘贴 \(count) 个文件" : "Pasted \(count) file(s)"
     }
+    var deleteImmediately: String {
+        isChinese ? "立即直接删除" : "Delete Immediately"
+    }
+    func trashingFiles(_ count: Int) -> String {
+        isChinese ? "正在移入废纸篓 (\(count) 个项目)..." : "Moving \(count) item(s) to Trash..."
+    }
+    func deletingFiles(_ count: Int) -> String {
+        isChinese ? "正在永久删除 (\(count) 个项目)..." : "Permanently deleting \(count) item(s)..."
+    }
     func deletedFiles(_ count: Int) -> String {
         isChinese ? "已移到废纸篓 \(count) 个文件" : "Moved \(count) file(s) to Trash"
+    }
+    func permanentlyDeletedFiles(_ count: Int) -> String {
+        isChinese ? "已永久删除 \(count) 个文件" : "Permanently deleted \(count) file(s)"
     }
     func directoryRefreshed(count: Int) -> String {
         isChinese ? "已刷新，共 \(count) 个项目" : "Refreshed: \(count) item(s)"
