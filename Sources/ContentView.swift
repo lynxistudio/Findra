@@ -405,6 +405,76 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .help(locale.refresh + " (Cmd+R / F5)")
 
+            // Sort Menu Button (Directly next to refresh button)
+            Menu {
+                Button {
+                    appState.setSortField(.modDate)
+                } label: {
+                    HStack {
+                        Text(locale.sortByModDate)
+                        if appState.sortField == .modDate { Image(systemName: "checkmark") }
+                    }
+                }
+                Button {
+                    appState.setSortField(.creationDate)
+                } label: {
+                    HStack {
+                        Text(locale.sortByCreationDate)
+                        if appState.sortField == .creationDate { Image(systemName: "checkmark") }
+                    }
+                }
+                Button {
+                    appState.setSortField(.size)
+                } label: {
+                    HStack {
+                        Text(locale.sortBySize)
+                        if appState.sortField == .size { Image(systemName: "checkmark") }
+                    }
+                }
+                Button {
+                    appState.setSortField(.duration)
+                } label: {
+                    HStack {
+                        Text(locale.sortByDuration)
+                        if appState.sortField == .duration { Image(systemName: "checkmark") }
+                    }
+                }
+                Button {
+                    appState.setSortField(.fileName)
+                } label: {
+                    HStack {
+                        Text(locale.sortByName)
+                        if appState.sortField == .fileName { Image(systemName: "checkmark") }
+                    }
+                }
+
+                Divider()
+
+                Button {
+                    appState.toggleSortAscending()
+                } label: {
+                    HStack {
+                        Text(appState.isSortAscending ? locale.sortAscending : locale.sortDescending)
+                        Image(systemName: appState.isSortAscending ? "arrow.up" : "arrow.down")
+                    }
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.system(size: 10))
+                    Text(appState.sortFieldDisplayName(locale: locale))
+                        .font(.system(size: 11))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 7))
+                }
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.08)))
+            }
+            .menuStyle(.borderlessButton)
+            .help(locale.sortOrderHelp)
+
             Divider().frame(height: 16)
 
             // View Mode Switcher
@@ -573,21 +643,34 @@ struct ContentView: View {
             }
             .width(ideal: 300)
 
+            TableColumn(locale.resolution) { file in
+                ResolutionTableCell(file: file)
+            }.width(min: 80, ideal: 95)
+
+            TableColumn(locale.duration) { file in
+                DurationTableCell(file: file)
+            }.width(min: 55, ideal: 70)
+
             TableColumn(locale.tableSize, value: \.size) { file in
                 Text(file.sizeFormatted)
                     .font(.system(size: 12)).foregroundColor(.secondary)
-            }.width(min: 80, ideal: 100)
+            }.width(min: 75, ideal: 90)
 
             TableColumn(locale.tableModDate, value: \.modDate) { file in
                 Text(file.modDateFormatted)
                     .font(.system(size: 12)).foregroundColor(.secondary)
-            }.width(min: 120, ideal: 140)
+            }.width(min: 110, ideal: 130)
+
+            TableColumn(locale.tableCreationDate, value: \.creationDate) { file in
+                Text(file.creationDateFormatted)
+                    .font(.system(size: 12)).foregroundColor(.secondary)
+            }.width(min: 110, ideal: 130)
 
             TableColumn(locale.tablePath) { file in
                 Text(file.fullPath)
                     .font(.system(size: 11)).foregroundColor(.secondary)
                     .lineLimit(1).truncationMode(.head)
-            }.width(ideal: 350)
+            }.width(ideal: 300)
         }
         .onChange(of: sortOrder) { _, newValue in
             if appState.isSearchActive {
@@ -1117,5 +1200,49 @@ final class QuickLookCoordinator: NSObject, QLPreviewPanelDataSource {
     func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
         guard previewURLs.indices.contains(index) else { return nil }
         return previewURLs[index] as QLPreviewItem
+    }
+}
+
+// MARK: - Resolution and Duration Table Cells
+
+struct ResolutionTableCell: View {
+    let file: IndexedFile
+    @State private var resolution: String? = nil
+
+    var body: some View {
+        Text(resolution ?? "—")
+            .font(.system(size: 11))
+            .foregroundColor(resolution != nil ? .cyan : .secondary.opacity(0.4))
+            .onAppear {
+                guard file.isMediaFile else { return }
+                if let cached = MediaMetadataManager.shared.cachedMetadata(for: file.fullPath)?.resolutionFormatted {
+                    self.resolution = cached
+                    return
+                }
+                MediaMetadataManager.shared.loadMetadata(for: file) { meta in
+                    self.resolution = meta?.resolutionFormatted
+                }
+            }
+    }
+}
+
+struct DurationTableCell: View {
+    let file: IndexedFile
+    @State private var duration: String? = nil
+
+    var body: some View {
+        Text(duration ?? "—")
+            .font(.system(size: 11))
+            .foregroundColor(duration != nil ? .primary : .secondary.opacity(0.4))
+            .onAppear {
+                guard file.isVideoFile || file.isAudioFile else { return }
+                if let cached = MediaMetadataManager.shared.cachedMetadata(for: file.fullPath)?.durationFormatted {
+                    self.duration = cached
+                    return
+                }
+                MediaMetadataManager.shared.loadMetadata(for: file) { meta in
+                    self.duration = meta?.durationFormatted
+                }
+            }
     }
 }

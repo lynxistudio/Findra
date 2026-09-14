@@ -220,4 +220,43 @@ final class LocaleManager: ObservableObject {
     func directoryRefreshed(count: Int) -> String {
         isChinese ? "已刷新，共 \(count) 个项目" : "Refreshed: \(count) item(s)"
     }
+
+    // MARK: - Sorting & Media Metadata
+
+    var resolution: String {
+        isChinese ? "分辨率" : "Resolution"
+    }
+    var duration: String {
+        isChinese ? "时长" : "Duration"
+    }
+    var tableCreationDate: String {
+        isChinese ? "创建时间" : "Date Created"
+    }
+    var sortByModDate: String {
+        isChinese ? "修改时间" : "Date Modified"
+    }
+    var sortByCreationDate: String {
+        isChinese ? "创建时间 (下载时间)" : "Date Created"
+    }
+    var sortBySize: String {
+        isChinese ? "文件大小" : "File Size"
+    }
+    var sortByDuration: String {
+        isChinese ? "时长" : "Duration"
+    }
+    var sortByName: String {
+        isChinese ? "文件名" : "File Name"
+    }
+    var sortAscending: String {
+        isChinese ? "升序" : "Ascending"
+    }
+    var sortDescending: String {
+        isChinese ? "降序" : "Descending"
+    }
+    var sortOrderHelp: String {
+        isChinese ? "更改排序方式" : "Change sort order"
+    }
+    var sortMenuTitle: String {
+        isChinese ? "排序" : "Sort"
+    }
 }

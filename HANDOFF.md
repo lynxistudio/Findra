@@ -18,9 +18,11 @@ Last updated: 2026-09-14 12:17 Asia/Singapore
 - Strict card geometry (`itemWidth x itemHeight`) with uniform column spacing to prevent outline overlapping.
 - Full daily file operations: `Cmd+X` cut with visual dimming, `Cmd+C` copy, `Cmd+V` smart paste (with collision resolution), `Return` inline rename, `Cmd+Delete` trash.
 - Smooth selection system: Single click, Cmd-click toggle, Shift-click range selection, blank area deselection, and Windows/Finder-style rubber-band marquee drag box selection.
+- Media resolution & duration display: ImageIO header probe (<0.1ms) and AVFoundation async extraction, displayed between filename and size in Grid view, plus dedicated columns in Table view.
+- Intuitive directory sorting button: Top navigation bar dropdown menu next to refresh button for sorting by date modified, date created (local download time), size, duration, and file name.
 - Search input blur & Quick Look Spacebar conflict resolution: Search field only activates when clicked, Spacebar reliably triggers Quick Look.
 - Synchronized Quick Look preview with arrow key selection navigation.
-- Successfully built into `/Users/gray/Desktop/Findra.app` (3.6MB).
+- Successfully built and deployed to `/Applications/Findra.app` (3.7MB).
 
 ## Important Decisions
 - Keep search index-only and instant; do not traverse disks while typing.

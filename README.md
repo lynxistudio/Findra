@@ -102,6 +102,26 @@ Findra gives you **total control** over what gets indexed, uses a lightweight SQ
 - **Move to Trash (`Cmd+Delete`)** — safely move files and directories to the macOS Trash (`FileManager.trashItem`)
 - **Quick Look Follows Selection** — press `Space` to open Quick Look; moving selection with Arrow keys automatically updates the previewed file in real time
 
+### Media Resolution & Duration Display
+
+- **Instant Image Resolution** — uses `ImageIO` header parsing to extract dimensions in sub-0.1ms without decompressing pixel data
+- **Video & Audio Duration** — async `AVFoundation` extraction for video resolutions and video/audio playback duration
+- **Prominent Card Placement** — resolution (e.g. `1920 × 1080`) and duration are displayed directly below the filename and above the file size in Grid view
+- **Dedicated List Columns** — Table view features distinct `Resolution`, `Duration`, and `Date Created` columns
+- **Two-Tier Metadata Cache** — in-memory `NSCache` guarantees smooth, stutter-free scrolling
+
+### Intuitive Directory Sorting Button
+
+- **Toolbar Dropdown Menu** — prominent sorting button placed directly beside the refresh button (`Cmd+R` / `F5`)
+- **Key Sorting Modes**:
+  - **Date Modified** (修改时间)
+  - **Date Created** (创建时间 / local download time)
+  - **File Size** (文件大小)
+  - **Duration** (时长 — longest to shortest for media)
+  - **File Name** (文件名)
+- **One-Click Ascending / Descending Toggle** — easily reverse order without right-clicking
+- **Folder Preservation** — directories remain pinned to the top for seamless navigation
+
 ### Selection System & Marquee Drag Box
 
 - **Single Click & Blank Deselect** — click item to select; click blank canvas to deselect all and blur search focus
@@ -310,6 +330,7 @@ Findra/
 │   ├── ContentView.swift        # SwiftUI layout: sidebar, toolbar, PathBar, search bar, table/grid
 │   ├── FileGridView.swift       # Streaming thumbnail grid view, card geometry, marquee drag box selection
 │   ├── ThumbnailManager.swift   # Multi-tier async streaming thumbnail engine (QLThumbnailGenerator + AVFoundation)
+│   ├── MediaMetadataManager.swift # High-speed image resolution & video/audio duration metadata extraction
 │   ├── DatabaseManager.swift    # SQLite setup, schema, parent_path indexing, CRUD, FTS5 table management
 │   ├── ScanManager.swift        # fd/find invocation, FSEvents watcher, staged scans, incremental scan
 │   ├── SearchManager.swift      # FTS5 MATCH query construction and execution

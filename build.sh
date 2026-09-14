@@ -20,7 +20,7 @@ rm -rf "$OUTPUT_APP"
 # Compile Swift sources into a single Mach-O binary
 echo "--- Compiling Swift sources ---"
 SDK=$(xcrun --show-sdk-path)
-FRAMEWORKS="SwiftUI AppKit Quartz QuickLookThumbnailing AVFoundation"
+FRAMEWORKS="SwiftUI AppKit Quartz QuickLookThumbnailing AVFoundation ImageIO"
 FW_FLAGS=""
 for fw in $FRAMEWORKS; do
     FW_FLAGS="$FW_FLAGS -F $SDK/System/Library/Frameworks -framework $fw"

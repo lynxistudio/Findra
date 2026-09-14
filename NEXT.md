@@ -34,8 +34,15 @@ Last updated: 2026-09-14 12:17 Asia/Singapore
   - 清理桌面临时构建残留（`/Users/gray/Desktop/Findra.app`）。
   - 清理项目根目录历史压缩包与多余媒体文件（`FastFinder_v2.0.1.zip`、`Findra_v2.1.0.zip`、`Sources/FastFinder` 二进制、散落录屏与截图）。
   - 清理系统 Library 中已废弃的旧版 FastFinder 缓存与配置残留。
+- **阶段 7：媒体文件分辨率直观展示与顶部直观排序按钮（2026-09-14 扩展）**：
+  - `Sources/MediaMetadataManager.swift`：采用 `ImageIO`（读取头部 <0.1ms）与 `AVFoundation`（现代 async API）解析图片/视频分辨率与时长，配备多级内存缓存。
+  - `Sources/FileGridView.swift`：网格卡片在文件名下方、文件大小上方清晰展示分辨率标签（如 `1920 × 1080`，视频同步显示时长）；
+  - `Sources/ContentView.swift`：
+    - 在顶部导航栏刷新按钮旁增设直观的排序菜单按钮 `[ ⇅ 修改时间 ▾ ]`，支持修改时间、创建时间（下载到本地时间）、文件大小、时长、文件名，以及升降序一键切换；
+    - 列表视图（Table）新增「分辨率」、「时长」与「创建时间」专属列。
+  - `Sources/FindraApp.swift` & `Sources/DatabaseManager.swift`：`IndexedFile` 支持 `creationDate` 与多维度实时重排序。
 - **构建与交付**：
-  - `./build.sh` 编译完成，产物位于 `/Applications/Findra.app` (3.6MB)。
+  - `./build.sh` 编译完成，产物位于 `/Applications/Findra.app` (3.7MB)。
 
 ## Remaining
 - [ ] 邀请用户上手体验新版 `Findra.app`，反馈具体使用细节或优化建议。

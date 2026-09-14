@@ -1,6 +1,8 @@
 # Changelog
 
 ## 2026-09-14
+- Added instant media resolution & duration display: reads image header via ImageIO (<0.1ms) and video/audio metadata via AVFoundation; displays resolution (e.g. `1920 × 1080`) in grid cards (between filename and size) and in dedicated Table columns.
+- Added intuitive directory sorting button in the navigation toolbar directly beside the refresh button: instant menu to sort by date modified, date created (local download time), file size, duration, and file name, with one-click ascending/descending toggle.
 - Upgraded Findra into a native macOS dual-mode file manager with instant FTS search and full hierarchical directory browsing.
 - Fixed thumbnail grid card overlapping by establishing strict card geometry (`itemWidth x itemHeight`) and uniform grid cell spacing.
 - Fixed search input focus conflict: search field no longer autofocuses on startup; clicking the file canvas or pressing Down Arrow exits search focus; Spacebar reliably opens Quick Look without inserting spaces into the search bar.

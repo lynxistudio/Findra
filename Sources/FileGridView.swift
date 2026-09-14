@@ -37,7 +37,7 @@ struct FileGridView: View {
     }
 
     private var itemHeight: CGFloat {
-        cardSize + 56
+        cardSize + 66
     }
 
     private var gridColumns: [GridItem] {
@@ -267,6 +267,7 @@ struct ThumbnailCardView: View {
     let onCommitRename: () -> Void
 
     @State private var thumbnail: NSImage? = nil
+    @State private var metadata: MediaMetadata? = nil
     @State private var isLoading = false
 
     private var targetSize: CGSize {
@@ -274,7 +275,7 @@ struct ThumbnailCardView: View {
     }
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 3) {
             // Thumbnail / Icon Canvas
             ZStack(alignment: .bottomTrailing) {
                 ZStack {
@@ -330,6 +331,33 @@ struct ThumbnailCardView: View {
                     .frame(width: cardSize + 12, height: 26, alignment: .top)
             }
 
+            // Resolution & Duration badge (between name and size for images & videos)
+            if let res = metadata?.resolutionFormatted {
+                HStack(spacing: 3) {
+                    Text(res)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(isSelected ? .white.opacity(0.95) : .cyan)
+                        .lineLimit(1)
+                    if let dur = metadata?.durationFormatted {
+                        Text("· " + dur)
+                            .font(.system(size: 8.5))
+                            .foregroundColor(isSelected ? .white.opacity(0.8) : .secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(height: 12)
+            } else if let dur = metadata?.durationFormatted {
+                Text(dur)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(isSelected ? .white.opacity(0.85) : .secondary)
+                    .lineLimit(1)
+                    .frame(height: 12)
+            } else {
+                Text(" ")
+                    .font(.system(size: 9))
+                    .frame(height: 12)
+            }
+
             // Size badge (keeps consistent baseline between files and directories)
             Text(file.isDirectory ? " " : file.sizeFormatted)
                 .font(.system(size: 9))
@@ -350,6 +378,7 @@ struct ThumbnailCardView: View {
         .opacity(isCut ? 0.45 : 1.0)
         .onAppear {
             loadThumbnailIfNeeded()
+            loadMetadataIfNeeded()
         }
         .onDisappear {
             ThumbnailManager.shared.cancelRequest(for: file, targetSize: targetSize)
@@ -372,6 +401,17 @@ struct ThumbnailCardView: View {
                     self.thumbnail = image
                 }
             }
+        }
+    }
+
+    private func loadMetadataIfNeeded() {
+        guard file.isMediaFile || file.isAudioFile else { return }
+        if let cached = MediaMetadataManager.shared.cachedMetadata(for: file.fullPath) {
+            self.metadata = cached
+            return
+        }
+        MediaMetadataManager.shared.loadMetadata(for: file) { meta in
+            self.metadata = meta
         }
     }
 }

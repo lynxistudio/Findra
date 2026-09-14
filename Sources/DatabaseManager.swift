@@ -727,7 +727,8 @@ final class DatabaseManager {
             .isDirectoryKey,
             .isRegularFileKey,
             .fileSizeKey,
-            .contentModificationDateKey
+            .contentModificationDateKey,
+            .creationDateKey
         ]
 
         guard let contents = try? fm.contentsOfDirectory(
@@ -740,9 +741,11 @@ final class DatabaseManager {
 
         var items: [IndexedFile] = []
         for itemURL in contents {
-            let isDir = (try? itemURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-            let size = Int64((try? itemURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-            let modDate = (try? itemURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate?.timeIntervalSince1970) ?? 0
+            let values = try? itemURL.resourceValues(forKeys: Set(resourceKeys))
+            let isDir = values?.isDirectory ?? false
+            let size = Int64(values?.fileSize ?? 0)
+            let modDate = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
+            let creationDate = values?.creationDate?.timeIntervalSince1970 ?? modDate
             let fullPath = itemURL.path
             let fileName = itemURL.lastPathComponent
 
@@ -753,6 +756,7 @@ final class DatabaseManager {
                 parentPath: path,
                 size: isDir ? 0 : size,
                 modDate: modDate,
+                creationDate: creationDate,
                 dirId: 0,
                 isDirectory: isDir
             )

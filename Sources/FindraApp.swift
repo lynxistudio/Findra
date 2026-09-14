@@ -38,6 +38,7 @@ struct IndexedFile: Identifiable, Equatable, Hashable {
     var parentPath: String = ""
     var size: Int64 = 0
     var modDate: Double = 0
+    var creationDate: Double = 0
     var dirId: Int64 = 0
     var isDirectory: Bool = false
 
@@ -55,11 +56,14 @@ struct IndexedFile: Identifiable, Equatable, Hashable {
     }
 
     var isMediaFile: Bool {
-        let mediaExtensions: Set<String> = [
-            "jpg", "jpeg", "png", "gif", "heic", "webp", "tiff", "bmp", "raw", "cr2", "nef", "arw",
-            "mp4", "mov", "m4v", "avi", "mkv", "webm", "flv", "wmv"
+        isImageFile || isVideoFile
+    }
+
+    var isImageFile: Bool {
+        let imageExtensions: Set<String> = [
+            "jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "tiff", "bmp", "raw", "cr2", "nef", "arw", "svg", "avif", "ico"
         ]
-        return mediaExtensions.contains(fileExtension)
+        return imageExtensions.contains(fileExtension)
     }
 
     var isVideoFile: Bool {
@@ -67,6 +71,13 @@ struct IndexedFile: Identifiable, Equatable, Hashable {
             "mp4", "mov", "m4v", "avi", "mkv", "webm", "flv", "wmv"
         ]
         return videoExtensions.contains(fileExtension)
+    }
+
+    var isAudioFile: Bool {
+        let audioExtensions: Set<String> = [
+            "mp3", "wav", "m4a", "aac", "flac", "aiff", "ogg", "wma"
+        ]
+        return audioExtensions.contains(fileExtension)
     }
 
     var sizeFormatted: String {
@@ -86,6 +97,26 @@ struct IndexedFile: Identifiable, Equatable, Hashable {
         fmt.dateFormat = "yyyy-MM-dd HH:mm"
         return fmt.string(from: date)
     }
+
+    var creationDateFormatted: String {
+        let timestamp = creationDate > 0 ? creationDate : modDate
+        let date = Date(timeIntervalSince1970: timestamp)
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd HH:mm"
+        return fmt.string(from: date)
+    }
+}
+
+// MARK: - Sort Field Options
+
+enum SortField: String, CaseIterable, Identifiable {
+    case modDate = "modDate"
+    case creationDate = "creationDate"
+    case size = "size"
+    case duration = "duration"
+    case fileName = "fileName"
+
+    var id: String { rawValue }
 }
 
 struct DirectoryIndexStats {
@@ -270,6 +301,10 @@ final class AppState: ObservableObject {
     @Published var viewMode: ViewMode = .list
     @Published var thumbnailSize: CGFloat = 110
 
+    // Sorting State
+    @Published var sortField: SortField = .modDate
+    @Published var isSortAscending: Bool = false
+
     // Clipboard & Operations
     @Published var cutFilePaths: Set<String> = []
     @Published var copiedFilePaths: Set<String> = []
@@ -278,6 +313,67 @@ final class AppState: ObservableObject {
     let scanManager = ScanManager()
     lazy var searchManager = SearchManager(dbManager: dbManager)
     var locale: LocaleManager? = nil
+
+    func setSortField(_ field: SortField) {
+        if sortField == field {
+            isSortAscending.toggle()
+        } else {
+            sortField = field
+            switch field {
+            case .modDate, .creationDate, .size, .duration:
+                isSortAscending = false
+            case .fileName:
+                isSortAscending = true
+            }
+        }
+        applyCurrentSort()
+    }
+
+    func toggleSortAscending() {
+        isSortAscending.toggle()
+        applyCurrentSort()
+    }
+
+    func sortFieldDisplayName(locale: LocaleManager) -> String {
+        switch sortField {
+        case .modDate: return locale.sortByModDate
+        case .creationDate: return locale.sortByCreationDate
+        case .size: return locale.sortBySize
+        case .duration: return locale.sortByDuration
+        case .fileName: return locale.sortByName
+        }
+    }
+
+    func applyCurrentSort() {
+        sortFilesList(&browsedFiles)
+        sortFilesList(&searchResults)
+    }
+
+    func sortFilesList(_ files: inout [IndexedFile]) {
+        files.sort { a, b in
+            if a.isDirectory != b.isDirectory {
+                return a.isDirectory && !b.isDirectory
+            }
+            let isAsc = isSortAscending
+            switch sortField {
+            case .modDate:
+                return isAsc ? a.modDate < b.modDate : a.modDate > b.modDate
+            case .creationDate:
+                let aDate = a.creationDate > 0 ? a.creationDate : a.modDate
+                let bDate = b.creationDate > 0 ? b.creationDate : b.modDate
+                return isAsc ? aDate < bDate : aDate > bDate
+            case .size:
+                return isAsc ? a.size < b.size : a.size > b.size
+            case .duration:
+                let aDur = MediaMetadataManager.shared.cachedMetadata(for: a.fullPath)?.duration ?? 0
+                let bDur = MediaMetadataManager.shared.cachedMetadata(for: b.fullPath)?.duration ?? 0
+                return isAsc ? aDur < bDur : aDur > bDur
+            case .fileName:
+                let order = a.fileName.localizedStandardCompare(b.fileName)
+                return isAsc ? (order == .orderedAscending) : (order == .orderedDescending)
+            }
+        }
+    }
 
     private var cancellables = Set<AnyCancellable>()
     private var scanTimer: Timer?
@@ -459,7 +555,9 @@ final class AppState: ObservableObject {
             searchResults = []
             return
         }
-        searchResults = searchManager.search(query: q, limit: 10000)
+        var results = searchManager.search(query: q, limit: 10000)
+        sortFilesList(&results)
+        searchResults = results
         totalFileCount = dbManager.getTotalFileCount()
     }
 
@@ -560,7 +658,8 @@ final class AppState: ObservableObject {
 
     func refreshCurrentDirectory() {
         guard let current = currentDirectoryPath else { return }
-        let liveItems = dbManager.getFileSystemItems(at: current)
+        var liveItems = dbManager.getFileSystemItems(at: current)
+        sortFilesList(&liveItems)
         browsedFiles = liveItems
         statusText = locale?.directoryRefreshed(count: liveItems.count) ?? "Refreshed \(liveItems.count) items"
     }
@@ -572,8 +671,9 @@ final class AppState: ObservableObject {
         }
 
         // 1. Fast cache path: load from indexed SQLite database in < 2ms
-        let dbItems = dbManager.getFilesInDirectory(parentPath: current)
+        var dbItems = dbManager.getFilesInDirectory(parentPath: current)
         if !dbItems.isEmpty {
+            sortFilesList(&dbItems)
             browsedFiles = dbItems
             statusText = locale?.resultCount(dbItems.count) ?? "\(dbItems.count) items"
         }
@@ -581,7 +681,8 @@ final class AppState: ObservableObject {
         // 2. Direct filesystem read ensures real-time accuracy and covers unindexed folders
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            let liveItems = self.dbManager.getFileSystemItems(at: current)
+            var liveItems = self.dbManager.getFileSystemItems(at: current)
+            self.sortFilesList(&liveItems)
             DispatchQueue.main.async {
                 if self.currentDirectoryPath == current {
                     self.browsedFiles = liveItems
