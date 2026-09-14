@@ -63,6 +63,7 @@ final class DatabaseManager {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 file_name TEXT NOT NULL,
                 full_path TEXT NOT NULL UNIQUE,
+                parent_path TEXT NOT NULL DEFAULT '',
                 size INTEGER DEFAULT 0,
                 mod_date REAL DEFAULT 0,
                 dir_id INTEGER NOT NULL,
@@ -72,13 +73,16 @@ final class DatabaseManager {
             """
             sqlite3_exec(db, createFiles, nil, nil, nil)
 
-            // Migration: add is_directory column for existing databases
+            // Migration: add is_directory and parent_path columns for existing databases
             sqlite3_exec(db, "ALTER TABLE files ADD COLUMN is_directory INTEGER DEFAULT 0", nil, nil, nil)
+            sqlite3_exec(db, "ALTER TABLE files ADD COLUMN parent_path TEXT DEFAULT ''", nil, nil, nil)
 
             let idxName = "CREATE INDEX IF NOT EXISTS idx_files_name ON files(file_name);"
             sqlite3_exec(db, idxName, nil, nil, nil)
             let idxPath = "CREATE INDEX IF NOT EXISTS idx_files_path ON files(full_path);"
             sqlite3_exec(db, idxPath, nil, nil, nil)
+            let idxParent = "CREATE INDEX IF NOT EXISTS idx_files_parent ON files(parent_path);"
+            sqlite3_exec(db, idxParent, nil, nil, nil)
             let idxDirId = "CREATE INDEX IF NOT EXISTS idx_files_dirid ON files(dir_id);"
             sqlite3_exec(db, idxDirId, nil, nil, nil)
             let idxModDate = "CREATE INDEX IF NOT EXISTS idx_files_mod_date ON files(mod_date);"
@@ -89,6 +93,7 @@ final class DatabaseManager {
                 scan_id TEXT NOT NULL,
                 file_name TEXT NOT NULL,
                 full_path TEXT NOT NULL,
+                parent_path TEXT NOT NULL DEFAULT '',
                 size INTEGER DEFAULT 0,
                 mod_date REAL DEFAULT 0,
                 is_directory INTEGER DEFAULT 0,
@@ -96,6 +101,7 @@ final class DatabaseManager {
             );
             """
             sqlite3_exec(db, createScanStaging, nil, nil, nil)
+            sqlite3_exec(db, "ALTER TABLE scan_staging ADD COLUMN parent_path TEXT DEFAULT ''", nil, nil, nil)
 
             // Excluded directories table
             let createExcluded = """
@@ -279,12 +285,12 @@ final class DatabaseManager {
 
     // MARK: - File Operations
 
-    func insertFilesBatch(_ files: [(fileName: String, fullPath: String, size: Int64, modDate: Double, dirId: Int64, isDirectory: Bool)]) {
+    func insertFilesBatch(_ files: [(fileName: String, fullPath: String, parentPath: String, size: Int64, modDate: Double, dirId: Int64, isDirectory: Bool)]) {
         dbQueue.sync {
             sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil)
             let sql = """
-            INSERT OR REPLACE INTO files (file_name, full_path, size, mod_date, dir_id, is_directory)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO files (file_name, full_path, parent_path, size, mod_date, dir_id, is_directory)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -292,14 +298,16 @@ final class DatabaseManager {
                 return
             }
             for file in files {
+                let parent = file.parentPath.isEmpty ? URL(fileURLWithPath: file.fullPath).deletingLastPathComponent().path : file.parentPath
                 sqlite3_reset(stmt)
                 sqlite3_clear_bindings(stmt)
                 sqlite3_bind_text(stmt, 1, file.fileName, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_text(stmt, 2, file.fullPath, -1, SQLITE_TRANSIENT)
-                sqlite3_bind_int64(stmt, 3, file.size)
-                sqlite3_bind_double(stmt, 4, file.modDate)
-                sqlite3_bind_int64(stmt, 5, file.dirId)
-                sqlite3_bind_int(stmt, 6, file.isDirectory ? 1 : 0)
+                sqlite3_bind_text(stmt, 3, parent, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_int64(stmt, 4, file.size)
+                sqlite3_bind_double(stmt, 5, file.modDate)
+                sqlite3_bind_int64(stmt, 6, file.dirId)
+                sqlite3_bind_int(stmt, 7, file.isDirectory ? 1 : 0)
                 sqlite3_step(stmt)
             }
             sqlite3_finalize(stmt)
@@ -308,7 +316,7 @@ final class DatabaseManager {
     }
 
     /// Atomically replace all entries for a directory: delete old + insert new in one transaction
-    func replaceDirectoryEntries(dirId: Int64, entries: [(fileName: String, fullPath: String, size: Int64, modDate: Double, isDirectory: Bool)]) {
+    func replaceDirectoryEntries(dirId: Int64, entries: [(fileName: String, fullPath: String, parentPath: String, size: Int64, modDate: Double, isDirectory: Bool)]) {
         dbQueue.sync {
             sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil)
 
@@ -321,8 +329,8 @@ final class DatabaseManager {
 
             // Insert new entries
             let sql = """
-            INSERT OR REPLACE INTO files (file_name, full_path, size, mod_date, dir_id, is_directory)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO files (file_name, full_path, parent_path, size, mod_date, dir_id, is_directory)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -330,14 +338,16 @@ final class DatabaseManager {
                 return
             }
             for entry in entries {
+                let parent = entry.parentPath.isEmpty ? URL(fileURLWithPath: entry.fullPath).deletingLastPathComponent().path : entry.parentPath
                 sqlite3_reset(stmt)
                 sqlite3_clear_bindings(stmt)
                 sqlite3_bind_text(stmt, 1, entry.fileName, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_text(stmt, 2, entry.fullPath, -1, SQLITE_TRANSIENT)
-                sqlite3_bind_int64(stmt, 3, entry.size)
-                sqlite3_bind_double(stmt, 4, entry.modDate)
-                sqlite3_bind_int64(stmt, 5, dirId)
-                sqlite3_bind_int(stmt, 6, entry.isDirectory ? 1 : 0)
+                sqlite3_bind_text(stmt, 3, parent, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_int64(stmt, 4, entry.size)
+                sqlite3_bind_double(stmt, 5, entry.modDate)
+                sqlite3_bind_int64(stmt, 6, dirId)
+                sqlite3_bind_int(stmt, 7, entry.isDirectory ? 1 : 0)
                 sqlite3_step(stmt)
             }
             sqlite3_finalize(stmt)
@@ -359,14 +369,14 @@ final class DatabaseManager {
         }
     }
 
-    func appendDirectoryScanEntries(_ scanId: String, entries: [(fileName: String, fullPath: String, size: Int64, modDate: Double, isDirectory: Bool)]) -> Bool {
+    func appendDirectoryScanEntries(_ scanId: String, entries: [(fileName: String, fullPath: String, parentPath: String, size: Int64, modDate: Double, isDirectory: Bool)]) -> Bool {
         guard !entries.isEmpty else { return true }
 
         return dbQueue.sync {
             guard sqlite3_exec(db, "BEGIN IMMEDIATE TRANSACTION", nil, nil, nil) == SQLITE_OK else { return false }
             let sql = """
-            INSERT OR REPLACE INTO scan_staging (scan_id, file_name, full_path, size, mod_date, is_directory)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO scan_staging (scan_id, file_name, full_path, parent_path, size, mod_date, is_directory)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -376,14 +386,16 @@ final class DatabaseManager {
 
             var success = true
             for entry in entries {
+                let parent = entry.parentPath.isEmpty ? URL(fileURLWithPath: entry.fullPath).deletingLastPathComponent().path : entry.parentPath
                 sqlite3_reset(stmt)
                 sqlite3_clear_bindings(stmt)
                 sqlite3_bind_text(stmt, 1, scanId, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_text(stmt, 2, entry.fileName, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_text(stmt, 3, entry.fullPath, -1, SQLITE_TRANSIENT)
-                sqlite3_bind_int64(stmt, 4, entry.size)
-                sqlite3_bind_double(stmt, 5, entry.modDate)
-                sqlite3_bind_int(stmt, 6, entry.isDirectory ? 1 : 0)
+                sqlite3_bind_text(stmt, 4, parent, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_int64(stmt, 5, entry.size)
+                sqlite3_bind_double(stmt, 6, entry.modDate)
+                sqlite3_bind_int(stmt, 7, entry.isDirectory ? 1 : 0)
                 if sqlite3_step(stmt) != SQLITE_DONE {
                     success = false
                     break
@@ -417,8 +429,8 @@ final class DatabaseManager {
             sqlite3_finalize(deleteFiles)
 
             let insertSQL = """
-            INSERT OR REPLACE INTO files (file_name, full_path, size, mod_date, dir_id, is_directory)
-            SELECT file_name, full_path, size, mod_date, ?, is_directory
+            INSERT OR REPLACE INTO files (file_name, full_path, parent_path, size, mod_date, dir_id, is_directory)
+            SELECT file_name, full_path, parent_path, size, mod_date, ?, is_directory
             FROM scan_staging WHERE scan_id = ?
             """
             var insertFiles: OpaquePointer?
@@ -524,7 +536,7 @@ final class DatabaseManager {
             var files: [IndexedFile] = []
             guard !ids.isEmpty else { return files }
             let placeholders = ids.map { _ in "?" }.joined(separator: ",")
-            let sql = "SELECT id, file_name, full_path, size, mod_date, dir_id, is_directory FROM files WHERE id IN (\(placeholders))"
+            let sql = "SELECT id, file_name, full_path, parent_path, size, mod_date, dir_id, is_directory FROM files WHERE id IN (\(placeholders))"
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return files }
             for (i, id) in ids.enumerated() {
@@ -551,7 +563,7 @@ final class DatabaseManager {
             // the trigram index, preserving substring semantics without scanning the disk.
             if tokens.count == 1 {
                 let likePattern = "%\(tokens[0])%"
-                let sql = "SELECT id, file_name, full_path, size, mod_date, dir_id, is_directory FROM files WHERE file_name LIKE ? LIMIT ?"
+                let sql = "SELECT id, file_name, full_path, parent_path, size, mod_date, dir_id, is_directory FROM files WHERE file_name LIKE ? LIMIT ?"
                 var stmt: OpaquePointer?
                 guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return files }
                 sqlite3_bind_text(stmt, 1, likePattern, -1, SQLITE_TRANSIENT)
@@ -563,7 +575,7 @@ final class DatabaseManager {
             } else if tokens.allSatisfy({ $0.count >= 3 }) {
                 let ftsQuery = tokens.map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"" }.joined(separator: " AND ")
                 let sql = """
-                SELECT f.id, f.file_name, f.full_path, f.size, f.mod_date, f.dir_id, f.is_directory
+                SELECT f.id, f.file_name, f.full_path, f.parent_path, f.size, f.mod_date, f.dir_id, f.is_directory
                 FROM files_fts ft
                 JOIN files f ON f.id = ft.rowid
                 WHERE files_fts MATCH ?
@@ -579,7 +591,7 @@ final class DatabaseManager {
                 sqlite3_finalize(stmt)
             } else {
                 let conditions = tokens.map { _ in "file_name LIKE ?" }.joined(separator: " AND ")
-                let sql = "SELECT id, file_name, full_path, size, mod_date, dir_id, is_directory FROM files WHERE \(conditions) LIMIT ?"
+                let sql = "SELECT id, file_name, full_path, parent_path, size, mod_date, dir_id, is_directory FROM files WHERE \(conditions) LIMIT ?"
                 var stmt: OpaquePointer?
                 guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return files }
                 for (index, token) in tokens.enumerated() {
@@ -639,12 +651,14 @@ final class DatabaseManager {
 
     func renameFile(fileId: Int64, newName: String, newPath: String) -> Bool {
         return dbQueue.sync {
-            let sql = "UPDATE files SET file_name = ?, full_path = ? WHERE id = ?"
+            let parentPath = URL(fileURLWithPath: newPath).deletingLastPathComponent().path
+            let sql = "UPDATE files SET file_name = ?, full_path = ?, parent_path = ? WHERE id = ?"
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
             sqlite3_bind_text(stmt, 1, newName, -1, SQLITE_TRANSIENT)
             sqlite3_bind_text(stmt, 2, newPath, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_int64(stmt, 3, fileId)
+            sqlite3_bind_text(stmt, 3, parentPath, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_int64(stmt, 4, fileId)
             let result = sqlite3_step(stmt)
             sqlite3_finalize(stmt)
             return result == SQLITE_DONE
@@ -653,7 +667,7 @@ final class DatabaseManager {
 
     func getFileByPath(_ path: String) -> IndexedFile? {
         return dbQueue.sync {
-            let sql = "SELECT id, file_name, full_path, size, mod_date, dir_id, is_directory FROM files WHERE full_path = ? LIMIT 1"
+            let sql = "SELECT id, file_name, full_path, parent_path, size, mod_date, dir_id, is_directory FROM files WHERE full_path = ? LIMIT 1"
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
             sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT)
@@ -676,6 +690,84 @@ final class DatabaseManager {
         }
     }
 
+    // MARK: - Directory Browsing Queries
+
+    /// Instant B-Tree lookup (< 2ms) for immediate children of a parent directory in SQLite index
+    func getFilesInDirectory(parentPath: String) -> [IndexedFile] {
+        return dbQueue.sync {
+            var files: [IndexedFile] = []
+            var normalized = parentPath
+            if normalized.count > 1 && normalized.hasSuffix("/") {
+                normalized = String(normalized.dropLast())
+            }
+            let sql = """
+            SELECT id, file_name, full_path, parent_path, size, mod_date, dir_id, is_directory
+            FROM files
+            WHERE parent_path = ?
+            ORDER BY is_directory DESC, file_name COLLATE NOCASE ASC
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return files }
+            sqlite3_bind_text(stmt, 1, normalized, -1, SQLITE_TRANSIENT)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                files.append(readFile(stmt))
+            }
+            sqlite3_finalize(stmt)
+            return files
+        }
+    }
+
+    /// Direct filesystem enumeration (for un-indexed directories or live reconciliation)
+    func getFileSystemItems(at path: String) -> [IndexedFile] {
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: path) else { return [] }
+
+        let resourceKeys: [URLResourceKey] = [
+            .isDirectoryKey,
+            .isRegularFileKey,
+            .fileSizeKey,
+            .contentModificationDateKey
+        ]
+
+        guard let contents = try? fm.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: resourceKeys,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var items: [IndexedFile] = []
+        for itemURL in contents {
+            let isDir = (try? itemURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            let size = Int64((try? itemURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+            let modDate = (try? itemURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate?.timeIntervalSince1970) ?? 0
+            let fullPath = itemURL.path
+            let fileName = itemURL.lastPathComponent
+
+            let file = IndexedFile(
+                id: abs(Int64(bitPattern: UInt64(truncatingIfNeeded: fullPath.hashValue))),
+                fileName: fileName,
+                fullPath: fullPath,
+                parentPath: path,
+                size: isDir ? 0 : size,
+                modDate: modDate,
+                dirId: 0,
+                isDirectory: isDir
+            )
+            items.append(file)
+        }
+
+        items.sort {
+            if $0.isDirectory != $1.isDirectory {
+                return $0.isDirectory && !$1.isDirectory
+            }
+            return $0.fileName.localizedStandardCompare($1.fileName) == .orderedAscending
+        }
+        return items
+    }
+
     func getLastScanTime(for dirId: Int64) -> Double {
         return dbQueue.sync {
             var stmt: OpaquePointer?
@@ -691,14 +783,21 @@ final class DatabaseManager {
     }
 
     private func readFile(_ stmt: OpaquePointer!) -> IndexedFile {
+        let parentStr: String
+        if let cstr = sqlite3_column_text(stmt, 3) {
+            parentStr = String(cString: cstr)
+        } else {
+            parentStr = ""
+        }
         return IndexedFile(
             id: sqlite3_column_int64(stmt, 0),
             fileName: String(cString: sqlite3_column_text(stmt, 1)),
             fullPath: String(cString: sqlite3_column_text(stmt, 2)),
-            size: sqlite3_column_int64(stmt, 3),
-            modDate: sqlite3_column_double(stmt, 4),
-            dirId: sqlite3_column_int64(stmt, 5),
-            isDirectory: sqlite3_column_int(stmt, 6) != 0
+            parentPath: parentStr,
+            size: sqlite3_column_int64(stmt, 4),
+            modDate: sqlite3_column_double(stmt, 5),
+            dirId: sqlite3_column_int64(stmt, 6),
+            isDirectory: sqlite3_column_int(stmt, 7) != 0
         )
     }
 }

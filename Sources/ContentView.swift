@@ -48,6 +48,7 @@ struct ContentView: View {
             directorySidebar
                 .frame(minWidth: 200, idealWidth: 240, maxWidth: 320)
             VStack(spacing: 0) {
+                navigationToolbar
                 searchBar
                 resultsArea
                 statusBar
@@ -55,7 +56,7 @@ struct ContentView: View {
             .frame(minWidth: 500)
         }
         .onAppear {
-            isSearchFocused = true
+            isSearchFocused = false
             installResultsKeyMonitor()
         }
         .onDisappear { removeResultsKeyMonitor() }
@@ -69,8 +70,8 @@ struct ContentView: View {
         .onChange(of: isRenameFocused) { _, focused in
             if !focused { appState.cancelEditing() }
         }
-        .onChange(of: appState.searchResults) { _, results in
-            let visibleIds = Set(results.map(\.id))
+        .onChange(of: appState.visibleFiles) { _, files in
+            let visibleIds = Set(files.map { $0.id != 0 ? $0.id : $0.stableId })
             appState.selectedFiles.formIntersection(visibleIds)
         }
     }
@@ -97,10 +98,12 @@ struct ContentView: View {
             // Directory list with per-row delete buttons
             List {
                 ForEach(appState.directories) { dir in
+                    let isSelected = appState.currentDirectoryPath == dir.path
                     HStack(spacing: 4) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(URL(fileURLWithPath: dir.path).lastPathComponent)
-                                .font(.system(size: 12, weight: .medium))
+                                .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                                .foregroundColor(isSelected ? .accentColor : .primary)
                                 .lineLimit(1)
                             Text(dir.path)
                                 .font(.system(size: 9))
@@ -133,6 +136,15 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                     }
                     .padding(.vertical, 3)
+                    .padding(.horizontal, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        appState.navigateTo(path: dir.path)
+                    }
                     .contextMenu {
                         Button(locale.rescan) { appState.scanDirectory(dir) }
                         Button(locale.stopWatching) { appState.stopWatchingForDirectory(dir) }
@@ -279,57 +291,261 @@ struct ContentView: View {
         }.padding(30).frame(width: 400, height: 180)
     }
 
+    // MARK: - Navigation Toolbar
+
+    var navigationToolbar: some View {
+        HStack(spacing: 8) {
+            // Navigation Back / Forward / Up
+            HStack(spacing: 4) {
+                Button {
+                    appState.navigateBack()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .disabled(!appState.canNavigateBack)
+                .opacity(appState.canNavigateBack ? 1.0 : 0.35)
+                .help(locale.back + " (Cmd+[)")
+
+                Button {
+                    appState.navigateForward()
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .disabled(!appState.canNavigateForward)
+                .opacity(appState.canNavigateForward ? 1.0 : 0.35)
+                .help(locale.forward + " (Cmd+])")
+
+                Button {
+                    appState.navigateUp()
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .disabled(!appState.canNavigateUp)
+                .opacity(appState.canNavigateUp ? 1.0 : 0.35)
+                .help(locale.parentDirectory + " (Cmd+Up)")
+            }
+
+            Divider().frame(height: 16)
+
+            // Interactive Breadcrumb Path Bar
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 3) {
+                    if let currentPath = appState.currentDirectoryPath {
+                        let segments = pathSegments(for: currentPath)
+                        ForEach(segments.indices, id: \.self) { idx in
+                            let seg = segments[idx]
+                            Button {
+                                appState.navigateTo(path: seg.path)
+                            } label: {
+                                HStack(spacing: 3) {
+                                    if idx == 0 {
+                                        Image(systemName: "internaldrive")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Text(seg.name)
+                                        .font(.system(size: 11, weight: idx == segments.count - 1 ? .semibold : .regular))
+                                        .foregroundColor(idx == segments.count - 1 ? .primary : .secondary)
+                                }
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 2)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(Color.secondary.opacity(0.08))
+                                )
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                Button(locale.copyPath) {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(seg.path, forType: .string)
+                                }
+                                Button(locale.showInFinder) {
+                                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: seg.path)])
+                                }
+                            }
+
+                            if idx < segments.count - 1 {
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 8, weight: .semibold))
+                                    .foregroundColor(.secondary.opacity(0.4))
+                            }
+                        }
+                    } else {
+                        Text(locale.emptyPrompt)
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Spacer(minLength: 4)
+
+            // Force Refresh Button (F5 / Cmd+R)
+            Button {
+                appState.refreshCurrentDirectory()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.plain)
+            .help(locale.refresh + " (Cmd+R / F5)")
+
+            Divider().frame(height: 16)
+
+            // View Mode Switcher
+            HStack(spacing: 2) {
+                Button {
+                    appState.viewMode = .list
+                } label: {
+                    Image(systemName: "list.bullet")
+                        .font(.system(size: 11))
+                        .padding(4)
+                        .background(appState.viewMode == .list ? Color.accentColor.opacity(0.18) : Color.clear)
+                        .cornerRadius(4)
+                        .foregroundColor(appState.viewMode == .list ? .accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help(locale.listView)
+
+                Button {
+                    appState.viewMode = .grid
+                } label: {
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 11))
+                        .padding(4)
+                        .background(appState.viewMode == .grid ? Color.accentColor.opacity(0.18) : Color.clear)
+                        .cornerRadius(4)
+                        .foregroundColor(appState.viewMode == .grid ? .accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help(locale.gridView)
+            }
+
+            // Thumbnail Zoom Slider
+            if appState.viewMode == .grid {
+                Slider(value: $appState.thumbnailSize, in: 80...200)
+                    .frame(width: 65)
+                    .help(locale.thumbnailSize)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.4))
+    }
+
+    struct PathSegment: Identifiable {
+        var id: String { path }
+        let name: String
+        let path: String
+    }
+
+    func pathSegments(for fullPath: String) -> [PathSegment] {
+        let components = fullPath.split(separator: "/").map(String.init)
+        guard !components.isEmpty else {
+            return [PathSegment(name: "/", path: "/")]
+        }
+
+        var result: [PathSegment] = []
+        var currentAccum = ""
+        for comp in components {
+            currentAccum += "/" + comp
+            result.append(PathSegment(name: comp, path: currentAccum))
+        }
+        return result
+    }
+
     // MARK: - Search Bar
 
     var searchBar: some View {
         HStack(spacing: 0) {
             Image(systemName: "magnifyingglass").foregroundColor(.secondary).padding(.leading, 10)
             TextField(locale.searchPlaceholder, text: $appState.searchQuery)
-                .textFieldStyle(.plain).font(.system(size: 14))
+                .textFieldStyle(.plain).font(.system(size: 13))
                 .focused($isSearchFocused)
-                .padding(.vertical, 8).padding(.horizontal, 6)
+                .padding(.vertical, 6).padding(.horizontal, 6)
             if !appState.searchQuery.isEmpty {
-                Button { appState.searchQuery = "" } label: {
+                Button {
+                    appState.searchQuery = ""
+                } label: {
                     Image(systemName: "xmark.circle.fill").foregroundColor(.secondary)
                 }.buttonStyle(.plain).padding(.trailing, 8)
             }
         }
-        .background(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2), lineWidth: 1))
-        .padding(.horizontal, 12).padding(.top, 10)
+        .background(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2), lineWidth: 1))
+        .padding(.horizontal, 10).padding(.vertical, 6)
     }
 
     // MARK: - Results Area
 
     var resultsArea: some View {
         Group {
-            if appState.searchResults.isEmpty && !appState.searchQuery.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 28)).foregroundColor(.secondary.opacity(0.4))
-                    Text(locale.noResults).font(.body).foregroundColor(.secondary)
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if appState.searchResults.isEmpty && appState.searchQuery.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "folder")
-                        .font(.system(size: 32)).foregroundColor(.secondary.opacity(0.4))
-                    Text(locale.emptyPrompt).font(.body).foregroundColor(.secondary)
-                    Text(locale.totalFiles(appState.totalFileCount))
-                        .font(.caption).foregroundColor(.secondary)
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            if appState.isSearchActive {
+                if appState.searchResults.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 28)).foregroundColor(.secondary.opacity(0.4))
+                        Text(locale.noResults).font(.body).foregroundColor(.secondary)
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    fileContainerView(for: appState.searchResults)
+                }
             } else {
-                resultsTable
+                if appState.browsedFiles.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "folder")
+                            .font(.system(size: 32)).foregroundColor(.secondary.opacity(0.4))
+                        Text(locale.emptyFolder).font(.body).foregroundColor(.secondary)
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    fileContainerView(for: appState.browsedFiles)
+                }
             }
         }
     }
 
-    var resultsTable: some View {
-        Table(appState.searchResults, selection: $appState.selectedFiles, sortOrder: $sortOrder) {
+    @ViewBuilder
+    func fileContainerView(for files: [IndexedFile]) -> some View {
+        if appState.viewMode == .grid {
+            FileGridView(
+                files: files,
+                selectedIds: $appState.selectedFiles,
+                isRenameFocused: $isRenameFocused,
+                onDoubleClick: { file in
+                    if file.isDirectory {
+                        appState.navigateTo(path: file.fullPath)
+                    } else {
+                        NSWorkspace.shared.open(URL(fileURLWithPath: file.fullPath))
+                    }
+                }
+            )
+        } else {
+            resultsTable(for: files)
+        }
+    }
+
+    func resultsTable(for files: [IndexedFile]) -> some View {
+        Table(files, selection: $appState.selectedFiles, sortOrder: $sortOrder) {
             TableColumn(locale.tableFileName, value: \.fileName) { file in
                 HStack(spacing: 6) {
                     FileIconView(filePath: file.fullPath, fileName: file.fileName, isDirectory: file.isDirectory)
                         .frame(width: 18, height: 18)
 
-                    if appState.editingFileId == file.id {
+                    if appState.editingFileId == file.id || (file.id == 0 && appState.editingFileId == file.stableId) {
                         TextField("", text: $appState.editingFileName)
                             .textFieldStyle(.plain)
                             .font(.system(size: 13))
@@ -344,12 +560,13 @@ struct ContentView: View {
                 }
                 .contentShape(Rectangle())
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .opacity(appState.cutFilePaths.contains(file.fullPath) ? 0.45 : 1.0)
                 .overlay {
                     if appState.editingFileId != file.id {
                         FinderDragSourceOverlay(
                             file: file,
                             selectedIds: $appState.selectedFiles,
-                            visibleFiles: appState.searchResults
+                            visibleFiles: files
                         )
                     }
                 }
@@ -357,7 +574,7 @@ struct ContentView: View {
             .width(ideal: 300)
 
             TableColumn(locale.tableSize, value: \.size) { file in
-                Text(file.isDirectory ? "—" : file.sizeFormatted)
+                Text(file.sizeFormatted)
                     .font(.system(size: 12)).foregroundColor(.secondary)
             }.width(min: 80, ideal: 100)
 
@@ -370,29 +587,37 @@ struct ContentView: View {
                 Text(file.fullPath)
                     .font(.system(size: 11)).foregroundColor(.secondary)
                     .lineLimit(1).truncationMode(.head)
-            }.width(ideal: 400)
+            }.width(ideal: 350)
         }
         .onChange(of: sortOrder) { _, newValue in
-            appState.searchResults.sort(using: newValue)
+            if appState.isSearchActive {
+                appState.searchResults.sort(using: newValue)
+            } else {
+                appState.browsedFiles.sort(using: newValue)
+            }
             if let first = newValue.first {
                 saveSortOrder(first.keyPath, order: first.order)
             }
         }
         .contextMenu(forSelectionType: Int64.self) { selectedIds in
-            contextMenu(for: selectedIds)
+            contextMenu(for: selectedIds, in: files)
         }
         .onKeyPress(.return) {
             if appState.editingFileId != nil {
                 appState.commitEditing()
                 return .handled
             }
-            // Enter to rename selected file
+            // Enter on selected folder navigates into it; on selected file enters rename
             if appState.selectedFiles.count == 1,
                let id = appState.selectedFiles.first,
-               let file = appState.searchResults.first(where: { $0.id == id }),
-               !file.isDirectory {
-                appState.startEditingFile(file)
-                return .handled
+               let file = files.first(where: { $0.id == id || $0.stableId == id }) {
+                if file.isDirectory {
+                    appState.navigateTo(path: file.fullPath)
+                    return .handled
+                } else {
+                    appState.startEditingFile(file)
+                    return .handled
+                }
             }
             openSelectedFiles()
             return .handled
@@ -413,26 +638,41 @@ struct ContentView: View {
     // MARK: - Context Menu
 
     @ViewBuilder
-    func contextMenu(for selectedIds: Set<Int64>) -> some View {
+    func contextMenu(for selectedIds: Set<Int64>, in files: [IndexedFile]) -> some View {
         let ids = selectedIds.isEmpty ? appState.selectedFiles : selectedIds
-        let files = appState.dbManager.getFilesByIds(ids)
+        let targetFiles = files.filter { ids.contains($0.id) || ids.contains($0.stableId) }
 
-        if files.count == 1 {
-            Button(locale.rename) { appState.startEditingFile(files[0]) }
+        if targetFiles.count == 1 {
+            let single = targetFiles[0]
+            if single.isDirectory {
+                Button(locale.open) { appState.navigateTo(path: single.fullPath) }
+            } else {
+                Button(locale.open) { openFiles([single]) }
+                Button(locale.quickLook) { quickLookFiles([single]) }
+            }
             Divider()
+            Button(locale.rename) { appState.startEditingFile(single) }
             Button(locale.copy) { appState.copyFiles(ids) }
-            Button(locale.showInFinder) { appState.revealInFinder(files[0]) }
-            Button(locale.quickLook) { quickLookFiles(files) }
+            Button(locale.cut) { appState.cutFiles(ids) }
+            Button(locale.paste) { appState.pasteFiles() }
             Divider()
-            Button(locale.open) { openFiles(files) }
+            Button(locale.copyPath) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(single.fullPath, forType: .string)
+            }
+            Button(locale.showInFinder) { appState.revealInFinder(single) }
             Divider()
             Button(locale.moveToTrash, role: .destructive) { appState.deleteFiles(ids) }
         } else if !ids.isEmpty {
             Button(locale.copy) { appState.copyFiles(ids) }
-            Button(locale.quickLook) { quickLookFiles(files) }
-            Button(locale.open) { appState.openSelectedFiles() }
+            Button(locale.cut) { appState.cutFiles(ids) }
+            Button(locale.quickLook) { quickLookFiles(targetFiles) }
+            Button(locale.open) { openFiles(targetFiles) }
             Divider()
             Button(locale.moveToTrash, role: .destructive) { appState.deleteFiles(ids) }
+        } else {
+            Button(locale.paste) { appState.pasteFiles() }
+            Button(locale.refresh) { appState.refreshCurrentDirectory() }
         }
     }
 
@@ -449,7 +689,7 @@ struct ContentView: View {
                     .font(.system(size: 11)).foregroundColor(.secondary)
             }
             Spacer()
-            Text(locale.resultCount(appState.searchResults.count))
+            Text(locale.resultCount(appState.visibleFiles.count))
                 .font(.system(size: 11)).foregroundColor(.secondary)
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
@@ -463,7 +703,7 @@ struct ContentView: View {
     }
 
     func quickLookSelected() {
-        let files = availableFiles(from: appState.dbManager.getFilesByIds(appState.selectedFiles))
+        let files = availableFiles(from: appState.visibleFiles.filter { appState.selectedFiles.contains($0.id) || appState.selectedFiles.contains($0.stableId) })
         guard !files.isEmpty else { return }
         QuickLookCoordinator.shared.togglePreview(
             urls: files.map { URL(fileURLWithPath: $0.fullPath) }
@@ -479,7 +719,8 @@ struct ContentView: View {
     }
 
     func openSelectedFiles() {
-        openFiles(appState.dbManager.getFilesByIds(appState.selectedFiles))
+        let files = appState.visibleFiles.filter { appState.selectedFiles.contains($0.id) || appState.selectedFiles.contains($0.stableId) }
+        openFiles(files)
     }
 
     func openFiles(_ files: [IndexedFile]) {
@@ -501,28 +742,122 @@ struct ContentView: View {
         guard resultsKeyMonitor == nil else { return }
         resultsKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+            // When editing text (TextField / NSTextView), preserve typing keys unless shortcut with Cmd
+            if let window = event.window, window.firstResponder is NSTextView || window.firstResponder is NSTextField {
+                if appState.editingFileId != nil {
+                    return event
+                }
+                // Spacebar with selected files triggers Quick Look when search query is empty
+                if event.keyCode == 49, modifiers.isEmpty, !appState.selectedFiles.isEmpty, appState.searchQuery.isEmpty {
+                    window.makeFirstResponder(nil)
+                    self.isSearchFocused = false
+                    self.quickLookSelected()
+                    return nil
+                }
+                // Down arrow from search field focuses results / selects first file
+                if event.keyCode == 125, modifiers.isEmpty { // Down Arrow
+                    window.makeFirstResponder(nil)
+                    self.isSearchFocused = false
+                    if appState.selectedFiles.isEmpty, let first = appState.visibleFiles.first {
+                        appState.selectedFiles = [first.id != 0 ? first.id : first.stableId]
+                    }
+                    return nil
+                }
+                if modifiers == [.command], event.charactersIgnoringModifiers?.lowercased() == "r" {
+                    appState.refreshCurrentDirectory()
+                    return nil
+                }
+                if event.keyCode == 53 { // Escape
+                    window.makeFirstResponder(nil)
+                    self.isSearchFocused = false
+                    return nil
+                }
+                if modifiers.isEmpty {
+                    return event
+                }
+            }
+
+            // Cmd+X (Cut)
+            if modifiers == [.command], event.charactersIgnoringModifiers?.lowercased() == "x" {
+                guard appState.editingFileId == nil, !appState.selectedFiles.isEmpty else { return event }
+                appState.cutFiles(appState.selectedFiles)
+                return nil
+            }
+
+            // Cmd+C (Copy)
             if modifiers == [.command], event.charactersIgnoringModifiers?.lowercased() == "c" {
-                guard appState.editingFileId == nil,
-                      !appState.selectedFiles.isEmpty,
-                      isResultsTableFocused(in: event.window) else { return event }
+                guard appState.editingFileId == nil, !appState.selectedFiles.isEmpty else { return event }
                 appState.copyFiles(appState.selectedFiles)
                 return nil
             }
 
-            guard event.keyCode == 49 else { return event }
-            guard !modifiers.contains(.command),
-                  !modifiers.contains(.control),
-                  !modifiers.contains(.option) else { return event }
-
-            if QuickLookCoordinator.shared.isPreviewVisible {
-                QuickLookCoordinator.shared.closePreview()
+            // Cmd+V (Paste)
+            if modifiers == [.command], event.charactersIgnoringModifiers?.lowercased() == "v" {
+                guard appState.editingFileId == nil else { return event }
+                appState.pasteFiles()
                 return nil
             }
 
-            guard !appState.selectedFiles.isEmpty,
-                  isResultsTableFocused(in: event.window) else { return event }
-            quickLookSelected()
-            return nil
+            // Cmd+R or F5 (Refresh) - F5 keycode is 96
+            if (modifiers == [.command] && event.charactersIgnoringModifiers?.lowercased() == "r") || event.keyCode == 96 {
+                appState.refreshCurrentDirectory()
+                return nil
+            }
+
+            // Cmd+[ (Navigate Back)
+            if modifiers == [.command], event.charactersIgnoringModifiers == "[" {
+                appState.navigateBack()
+                return nil
+            }
+
+            // Cmd+] (Navigate Forward)
+            if modifiers == [.command], event.charactersIgnoringModifiers == "]" {
+                appState.navigateForward()
+                return nil
+            }
+
+            // Cmd+Up (Navigate Up) - KeyCode 126
+            if modifiers == [.command], event.keyCode == 126 {
+                appState.navigateUp()
+                return nil
+            }
+
+            // Cmd+Delete (Move to Trash) - KeyCode 51
+            if modifiers == [.command], event.keyCode == 51 {
+                guard !appState.selectedFiles.isEmpty else { return event }
+                appState.deleteFiles(appState.selectedFiles)
+                return nil
+            }
+
+            // Spacebar (Quick Look) - KeyCode 49
+            if event.keyCode == 49 {
+                guard !modifiers.contains(.command),
+                      !modifiers.contains(.control),
+                      !modifiers.contains(.option) else { return event }
+
+                if QuickLookCoordinator.shared.isPreviewVisible {
+                    QuickLookCoordinator.shared.closePreview()
+                    return nil
+                }
+
+                guard !appState.selectedFiles.isEmpty else { return event }
+                quickLookSelected()
+                return nil
+            }
+
+            // Quick Look following selection with Arrow keys (123 Left, 124 Right, 125 Down, 126 Up)
+            if QuickLookCoordinator.shared.isPreviewVisible, [123, 124, 125, 126].contains(event.keyCode) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    let files = appState.visibleFiles.filter { appState.selectedFiles.contains($0.id) || appState.selectedFiles.contains($0.stableId) }
+                    let available = files.filter { FileManager.default.fileExists(atPath: $0.fullPath) }
+                    if !available.isEmpty {
+                        QuickLookCoordinator.shared.showPreview(urls: available.map { URL(fileURLWithPath: $0.fullPath) })
+                    }
+                }
+            }
+
+            return event
         }
     }
 
@@ -631,24 +966,26 @@ final class FinderDragSourceView: NSView, NSDraggingSource {
     }
 
     private func updateSelection(for file: IndexedFile, event: NSEvent) {
+        let fileKey = file.id != 0 ? file.id : file.stableId
         if event.modifierFlags.contains(.command) {
-            if selectedIds.wrappedValue.contains(file.id) {
-                selectedIds.wrappedValue.remove(file.id)
+            if selectedIds.wrappedValue.contains(fileKey) {
+                selectedIds.wrappedValue.remove(fileKey)
             } else {
-                selectedIds.wrappedValue.insert(file.id)
+                selectedIds.wrappedValue.insert(fileKey)
             }
-        } else if !selectedIds.wrappedValue.contains(file.id) {
-            selectedIds.wrappedValue = [file.id]
+        } else if !selectedIds.wrappedValue.contains(fileKey) {
+            selectedIds.wrappedValue = [fileKey]
         }
     }
 
     private func beginFinderDrag(for file: IndexedFile, with event: NSEvent) {
+        let fileKey = file.id != 0 ? file.id : file.stableId
         let files: [IndexedFile]
         let dragSelectedIds = armedSelectedIds
         let dragVisibleFiles = armedVisibleFiles.isEmpty ? visibleFiles : armedVisibleFiles
 
-        if dragSelectedIds.contains(file.id) {
-            files = dragVisibleFiles.filter { dragSelectedIds.contains($0.id) }
+        if dragSelectedIds.contains(fileKey) {
+            files = dragVisibleFiles.filter { dragSelectedIds.contains($0.id != 0 ? $0.id : $0.stableId) }
         } else {
             files = [file]
         }
