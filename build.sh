@@ -92,6 +92,14 @@ cat > "$OUTPUT_APP/Contents/Info.plist" << 'PLIST'
     <false/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Findra needs access to your Documents folder to index and browse your files.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Findra needs access to your Downloads folder to index and browse your files.</string>
+    <key>NSRemovableVolumesUsageDescription</key>
+    <string>Findra needs access to external and removable volumes to index and manage your files.</string>
+    <key>NSNetworkVolumesUsageDescription</key>
+    <string>Findra needs access to network volumes (SMB/NFS) to index and manage your remote files.</string>
 </dict>
 </plist>
 PLIST
@@ -101,9 +109,12 @@ echo "Info.plist created"
 # Classic app bundle marker for LaunchServices compatibility
 printf 'APPL????' > "$OUTPUT_APP/Contents/PkgInfo"
 
-# Ad-hoc code signing
+# Ad-hoc code signing with stable identifier to preserve macOS TCC permissions across builds
 echo "--- Signing ---"
-codesign --force --deep --sign - "$OUTPUT_APP" 2>/dev/null || true
+codesign --force --deep -s - -i "com.lynxistudio.findra" -r='designated => identifier "com.lynxistudio.findra"' "$OUTPUT_APP" 2>/dev/null || true
+
+# Remove quarantine/provenance flags so macOS doesn't treat it as an unverified download
+xattr -cr "$OUTPUT_APP" 2>/dev/null || true
 
 echo ""
 echo "=== Build Complete ==="

@@ -1,6 +1,8 @@
 # Changelog
 
 ## 2026-09-14
+- Fixed repeated disk/folder permission dialogs across app updates by anchoring a permanent designated requirement (`com.lynxistudio.findra`) and formal macOS usage descriptions (`NSDocumentsFolderUsageDescription`, `NSDownloadsFolderUsageDescription`, `NSRemovableVolumesUsageDescription`, `NSNetworkVolumesUsageDescription`).
+- Fixed silent background startup: window now automatically activates to frontmost (`NSApp.activate(ignoringOtherApps: true)`) and centers itself upon launch instead of lingering unfocused or hidden behind other active windows.
 - Compacted and repositioned directory sorting button: neatly grouped on the trailing side next to the List/Grid view switcher with `.fixedSize()` constraint, preventing awkward middle-toolbar spreading and maintaining macOS-standard toolbar rhythm.
 - Added instant media resolution & duration display: reads image header via ImageIO (<0.1ms) and video/audio metadata via AVFoundation; displays resolution (e.g. `1920 × 1080`) in grid cards (between filename and size) and in dedicated Table columns.
 - Added intuitive directory sorting button in the navigation toolbar: instant menu to sort by date modified, date created (local download time), file size, duration, and file name, with one-click ascending/descending toggle.
