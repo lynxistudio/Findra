@@ -555,18 +555,37 @@ final class AppState: ObservableObject {
             searchResults = []
             return
         }
-        var results = searchManager.search(query: q, limit: 10000)
-        sortFilesList(&results)
-        searchResults = results
-        totalFileCount = dbManager.getTotalFileCount()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            var results = self.searchManager.search(query: q, limit: 10000)
+            self.sortFilesList(&results)
+            let count = self.dbManager.getTotalFileCount()
+            DispatchQueue.main.async {
+                guard self.searchQuery.trimmingCharacters(in: .whitespaces) == q else { return }
+                self.searchResults = results
+                self.totalFileCount = count
+            }
+        }
     }
 
     func updateStats() {
-        totalFileCount = dbManager.getTotalFileCount()
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            let count = self.dbManager.getTotalFileCount()
+            DispatchQueue.main.async {
+                self.totalFileCount = count
+            }
+        }
     }
 
     func refreshDirectoryIndexStats() {
-        directoryIndexStats = dbManager.getDirectoryIndexStats()
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            let stats = self.dbManager.getDirectoryIndexStats()
+            DispatchQueue.main.async {
+                self.directoryIndexStats = stats
+            }
+        }
     }
 
     private func startScheduledScans() {
@@ -656,12 +675,20 @@ final class AppState: ObservableObject {
         }
     }
 
-    func refreshCurrentDirectory() {
+    func refreshCurrentDirectory(updateStatusText: Bool = true) {
         guard let current = currentDirectoryPath else { return }
-        var liveItems = dbManager.getFileSystemItems(at: current)
-        sortFilesList(&liveItems)
-        browsedFiles = liveItems
-        statusText = locale?.directoryRefreshed(count: liveItems.count) ?? "Refreshed \(liveItems.count) items"
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            var liveItems = self.dbManager.getFileSystemItems(at: current)
+            self.sortFilesList(&liveItems)
+            DispatchQueue.main.async {
+                guard self.currentDirectoryPath == current else { return }
+                self.browsedFiles = liveItems
+                if updateStatusText {
+                    self.statusText = self.locale?.directoryRefreshed(count: liveItems.count) ?? "Refreshed \(liveItems.count) items"
+                }
+            }
+        }
     }
 
     func loadCurrentDirectory() {
@@ -749,39 +776,45 @@ final class AppState: ObservableObject {
         }
 
         let isCut = pb.string(forType: NSPasteboard.PasteboardType("com.lynxistudio.findra.cut")) == "cut" || !cutFilePaths.isEmpty
-        let fm = FileManager.default
-        var processedCount = 0
+        statusText = isCut ? "Moving items..." : "Pasting items..."
 
-        for sourceURL in urls {
-            let sourcePath = sourceURL.path
-            let fileName = sourceURL.lastPathComponent
-            let targetURL = uniqueDestinationURL(for: fileName, in: dest)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let fm = FileManager.default
+            var processedCount = 0
 
-            do {
-                if isCut {
-                    try fm.moveItem(at: sourceURL, to: targetURL)
-                    if let file = dbManager.getFileByPath(sourcePath) {
-                        _ = dbManager.renameFile(fileId: file.id, newName: targetURL.lastPathComponent, newPath: targetURL.path)
+            for sourceURL in urls {
+                let sourcePath = sourceURL.path
+                let fileName = sourceURL.lastPathComponent
+                let targetURL = self.uniqueDestinationURL(for: fileName, in: dest)
+
+                do {
+                    if isCut {
+                        try fm.moveItem(at: sourceURL, to: targetURL)
+                        if let file = self.dbManager.getFileByPath(sourcePath) {
+                            _ = self.dbManager.renameFile(fileId: file.id, newName: targetURL.lastPathComponent, newPath: targetURL.path)
+                        }
+                        processedCount += 1
+                    } else {
+                        try fm.copyItem(at: sourceURL, to: targetURL)
+                        processedCount += 1
                     }
-                    processedCount += 1
-                } else {
-                    try fm.copyItem(at: sourceURL, to: targetURL)
-                    processedCount += 1
+                } catch {
+                    print("Paste error: \(error.localizedDescription)")
                 }
-            } catch {
-                print("Paste error: \(error.localizedDescription)")
+            }
+
+            DispatchQueue.main.async {
+                if isCut {
+                    self.cutFilePaths.removeAll()
+                    NSPasteboard.general.setString("", forType: NSPasteboard.PasteboardType("com.lynxistudio.findra.cut"))
+                }
+                self.statusText = self.locale?.pastedFiles(processedCount) ?? "Pasted \(processedCount) item(s)"
+                self.refreshCurrentDirectory(updateStatusText: false)
+                self.updateStats()
+                self.refreshDirectoryIndexStats()
             }
         }
-
-        if isCut {
-            cutFilePaths.removeAll()
-            pb.setString("", forType: NSPasteboard.PasteboardType("com.lynxistudio.findra.cut"))
-        }
-
-        statusText = locale?.pastedFiles(processedCount) ?? "Pasted \(processedCount) item(s)"
-        refreshCurrentDirectory()
-        updateStats()
-        refreshDirectoryIndexStats()
     }
 
     private func uniqueDestinationURL(for fileName: String, in directory: String) -> URL {
@@ -843,16 +876,19 @@ final class AppState: ObservableObject {
                 }
             }
 
+            let newTotal = self.dbManager.getTotalFileCount()
+            let newStats = self.dbManager.getDirectoryIndexStats()
+
             DispatchQueue.main.async {
-                self.updateStats()
-                self.refreshDirectoryIndexStats()
+                self.totalFileCount = newTotal
+                self.directoryIndexStats = newStats
                 if immediately {
                     self.statusText = self.locale?.permanentlyDeletedFiles(successfulCount) ?? "Permanently deleted \(successfulCount) file(s)"
                 } else {
                     self.statusText = self.locale?.deletedFiles(successfulCount) ?? "Moved \(successfulCount) item(s) to Trash"
                 }
-                // Refresh to sync any actual filesystem differences
-                self.refreshCurrentDirectory()
+                // Refresh to sync any actual filesystem differences without overwriting status text
+                self.refreshCurrentDirectory(updateStatusText: false)
                 if self.isSearchActive {
                     self.performSearch()
                 }

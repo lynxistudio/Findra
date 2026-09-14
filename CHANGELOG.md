@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-09-14
+- Eliminated macOS spinning wheel (beachball) freeze during and after file deletion: completely offloaded synchronous directory enumeration (`refreshCurrentDirectory`), database aggregation stat queries (`getTotalFileCount`, `getDirectoryIndexStats`), file paste copying (`pasteFiles`), and full-text search sorting from the main thread to background utility/user-initiated queues.
 - Fixed UI freeze when deleting/trashing large files on external drives or network volumes: file deletion operations (`trashItem` / `removeItem`) now run entirely on asynchronous background I/O threads with instant optimistic UI removal, eliminating spinning wheel / beachball freezes.
 - Added instant "Delete Immediately" (`Option+Cmd+Delete`) and context menu option for external drives, bypassing slow cross-volume trash copying for large files.
 - Enabled dynamic Quick Look (Space preview) following mouse selection clicks in list and grid views, matching macOS Finder behavior: clicking on another file seamlessly switches preview without closing or flickering the preview window; clearing selection closes preview.
