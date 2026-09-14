@@ -391,7 +391,7 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer(minLength: 4)
+            Spacer(minLength: 8)
 
             // Force Refresh Button (F5 / Cmd+R)
             Button {
@@ -405,7 +405,9 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .help(locale.refresh + " (Cmd+R / F5)")
 
-            // Sort Menu Button (Directly next to refresh button)
+            Divider().frame(height: 14)
+
+            // Sort Menu Button (Placed neatly right next to view mode switcher)
             Menu {
                 Button {
                     appState.setSortField(.modDate)
@@ -468,14 +470,13 @@ struct ContentView: View {
                         .font(.system(size: 7))
                 }
                 .foregroundColor(.secondary)
-                .padding(.horizontal, 6)
+                .padding(.horizontal, 5)
                 .padding(.vertical, 3)
                 .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.08)))
             }
             .menuStyle(.borderlessButton)
+            .fixedSize()
             .help(locale.sortOrderHelp)
-
-            Divider().frame(height: 16)
 
             // View Mode Switcher
             HStack(spacing: 2) {
