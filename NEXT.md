@@ -27,8 +27,15 @@ Last updated: 2026-09-14 12:17 Asia/Singapore
   - 取消启动默认聚焦搜索框，用户点击搜索框才进入编辑状态；点击文件区域或空白处主动注销输入焦点；优化空格键预览判定，避免空格字符误打入搜索框。
   - 支持空白区域点选取消选中，支持单选、Cmd+点击加选/减选、Shift+点击连续区间多选。
   - 实现了 Windows / 访达同款鼠标框选（Rubber-band Marquee Drag Selection），拖拽绘制半透明高亮矩形并实时碰撞多选。
+- **阶段 6：清理残余与正式部署（2026-09-14 部署）**：
+  - 验证图标 `AppIcon.icns` 完整性与高分辨率规格。
+  - 正式构建部署到 `/Applications/Findra.app`（v2.2.0）。
+  - `build.sh` 默认输出路径调整为 `/Applications/Findra.app`。
+  - 清理桌面临时构建残留（`/Users/gray/Desktop/Findra.app`）。
+  - 清理项目根目录历史压缩包与多余媒体文件（`FastFinder_v2.0.1.zip`、`Findra_v2.1.0.zip`、`Sources/FastFinder` 二进制、散落录屏与截图）。
+  - 清理系统 Library 中已废弃的旧版 FastFinder 缓存与配置残留。
 - **构建与交付**：
-  - `./build.sh` 编译完成，产物位于 `/Users/gray/Desktop/Findra.app` (3.6MB)。
+  - `./build.sh` 编译完成，产物位于 `/Applications/Findra.app` (3.6MB)。
 
 ## Remaining
 - [ ] 邀请用户上手体验新版 `Findra.app`，反馈具体使用细节或优化建议。
