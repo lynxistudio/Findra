@@ -857,58 +857,78 @@ struct ContentView: View {
         resultsKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
-            // When editing text (TextField / NSTextView), preserve typing keys unless shortcut with Cmd
-            if let window = event.window, window.firstResponder is NSTextView || window.firstResponder is NSTextField {
+            let isTextActive: Bool = {
+                if let responder = event.window?.firstResponder {
+                    if responder is NSTextView || responder is NSTextField {
+                        return true
+                    }
+                }
+                return self.isSearchFocused || self.appState.editingFileId != nil
+            }()
+
+            // When editing text (Search field, Inline rename, Sheets, etc.):
+            // Never hijack text editing shortcuts (Cmd+V, Cmd+C, Cmd+X, Cmd+A, Cmd+Z, plain typing)
+            if isTextActive {
                 if appState.editingFileId != nil {
                     return event
                 }
-                // Spacebar with selected files triggers Quick Look when search query is empty
+                // Spacebar with selected files triggers Quick Look only when search query is empty
                 if event.keyCode == 49, modifiers.isEmpty, !appState.selectedFiles.isEmpty, appState.searchQuery.isEmpty {
-                    window.makeFirstResponder(nil)
+                    event.window?.makeFirstResponder(nil)
                     self.isSearchFocused = false
                     self.quickLookSelected()
                     return nil
                 }
                 // Down arrow from search field focuses results / selects first file
                 if event.keyCode == 125, modifiers.isEmpty { // Down Arrow
-                    window.makeFirstResponder(nil)
+                    event.window?.makeFirstResponder(nil)
                     self.isSearchFocused = false
                     if appState.selectedFiles.isEmpty, let first = appState.visibleFiles.first {
                         appState.selectedFiles = [first.id != 0 ? first.id : first.stableId]
                     }
                     return nil
                 }
-                if modifiers == [.command], event.charactersIgnoringModifiers?.lowercased() == "r" {
+                // Cmd+R or F5 (Refresh)
+                if (modifiers == [.command] && event.charactersIgnoringModifiers?.lowercased() == "r") || event.keyCode == 96 {
                     appState.refreshCurrentDirectory()
                     return nil
                 }
+                // Escape clears search field focus
                 if event.keyCode == 53 { // Escape
-                    window.makeFirstResponder(nil)
+                    event.window?.makeFirstResponder(nil)
                     self.isSearchFocused = false
                     return nil
                 }
-                if modifiers.isEmpty {
-                    return event
-                }
+
+                // Forward all other events (Cmd+V paste, Cmd+C copy, Cmd+X cut, Cmd+A select all, Cmd+Z undo, typing, etc.) directly to the text field!
+                return event
             }
 
-            // Cmd+X (Cut)
+            // MARK: - File Browser Shortcuts (Only active when NOT editing text)
+
+            // Cmd+A (Select All Files)
+            if modifiers == [.command], event.charactersIgnoringModifiers?.lowercased() == "a" {
+                let allIds = appState.visibleFiles.map { $0.id != 0 ? $0.id : $0.stableId }
+                appState.selectedFiles = Set(allIds)
+                return nil
+            }
+
+            // Cmd+X (Cut Files)
             if modifiers == [.command], event.charactersIgnoringModifiers?.lowercased() == "x" {
-                guard appState.editingFileId == nil, !appState.selectedFiles.isEmpty else { return event }
+                guard !appState.selectedFiles.isEmpty else { return event }
                 appState.cutFiles(appState.selectedFiles)
                 return nil
             }
 
-            // Cmd+C (Copy)
+            // Cmd+C (Copy Files)
             if modifiers == [.command], event.charactersIgnoringModifiers?.lowercased() == "c" {
-                guard appState.editingFileId == nil, !appState.selectedFiles.isEmpty else { return event }
+                guard !appState.selectedFiles.isEmpty else { return event }
                 appState.copyFiles(appState.selectedFiles)
                 return nil
             }
 
-            // Cmd+V (Paste)
+            // Cmd+V (Paste Files)
             if modifiers == [.command], event.charactersIgnoringModifiers?.lowercased() == "v" {
-                guard appState.editingFileId == nil else { return event }
                 appState.pasteFiles()
                 return nil
             }

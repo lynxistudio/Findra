@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-20
+- Fixed text pasting (`Cmd+V`), copying (`Cmd+C`), cutting (`Cmd+X`), and selecting all (`Cmd+A`) in all input fields: resolved an issue where global file browser key monitor intercepted `Cmd+V` (attempting to paste files instead of text) whenever typing in the search bar or sheets. Input fields now seamlessly accept pasted text, URLs, and paths from the clipboard.
+- Added global `Cmd+A` shortcut to select all visible files when browsing the file list/grid.
+
 ## 2026-09-14
 - Added full native macOS file drag-and-drop support (`NSDraggingSession`) to external applications: users can now drag single or multi-selected files directly from both Grid and Table views to other apps (Finder, Desktop, WeChat, Photoshop, VSCode, Chrome, Terminal, Trash, etc.), with native 48x48 icon drag stacks, count badges, and `[.copy, .generic, .move]` operation permissions. Preserves marquee box selection when dragging on empty grid canvas.
 - Eliminated macOS spinning wheel (beachball) freeze during and after file deletion: completely offloaded synchronous directory enumeration (`refreshCurrentDirectory`), database aggregation stat queries (`getTotalFileCount`, `getDirectoryIndexStats`), file paste copying (`pasteFiles`), and full-text search sorting from the main thread to background utility/user-initiated queues.
