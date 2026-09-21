@@ -27,6 +27,7 @@ struct FileGridView: View {
     @State private var selectionBeforeDrag: Set<Int64> = []
     @State private var isCmdDrag: Bool = false
     @State private var lastClickedKey: Int64? = nil
+    @State private var isDraggingCard: Bool = false
 
     private var cardSize: CGFloat {
         max(80, appState.thumbnailSize)
@@ -186,10 +187,22 @@ struct FileGridView: View {
     }
 
     private func handleDragChange(_ value: DragGesture.Value) {
-        NSApp.keyWindow?.makeFirstResponder(nil)
+        if isDraggingCard || FileDragSourceView.isCardMouseDown {
+            return
+        }
 
         if dragStartPoint == nil {
-            dragStartPoint = value.startLocation
+            let start = value.startLocation
+            // If the drag originated on any file card, this is a file drag/selection gesture,
+            // handled natively by FileDragSourceView. Never start a marquee rubber-band box on top of a card.
+            let hitCard = itemFrames.values.contains { $0.insetBy(dx: -4, dy: -4).contains(start) }
+            if hitCard {
+                isDraggingCard = true
+                return
+            }
+
+            NSApp.keyWindow?.makeFirstResponder(nil)
+            dragStartPoint = start
             let modifiers = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
             isCmdDrag = modifiers.contains(.command)
             selectionBeforeDrag = isCmdDrag ? selectedIds : []
@@ -213,6 +226,8 @@ struct FileGridView: View {
     }
 
     private func handleDragEnd(_ value: DragGesture.Value) {
+        isDraggingCard = false
+        FileDragSourceView.isCardMouseDown = false
         dragStartPoint = nil
         dragCurrentPoint = nil
         selectionBeforeDrag = []

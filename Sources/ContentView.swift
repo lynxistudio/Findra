@@ -628,6 +628,22 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
+    private func tableDragOverlay(for file: IndexedFile, visibleFiles: [IndexedFile]) -> some View {
+        FileDragSourceOverlay(
+            file: file,
+            selectedIds: $appState.selectedFiles,
+            visibleFiles: visibleFiles,
+            onDoubleClick: {
+                if file.isDirectory {
+                    appState.navigateTo(path: file.fullPath)
+                } else {
+                    NSWorkspace.shared.open(file.url)
+                }
+            }
+        )
+    }
+
     func resultsTable(for files: [IndexedFile]) -> some View {
         Table(files, selection: $appState.selectedFiles, sortOrder: $sortOrder) {
             TableColumn(locale.tableFileName, value: \.fileName) { file in
@@ -655,18 +671,7 @@ struct ContentView: View {
                 .opacity(appState.cutFilePaths.contains(file.fullPath) ? 0.45 : 1.0)
                 .overlay {
                     if !isEditingThis {
-                        FileDragSourceOverlay(
-                            file: file,
-                            selectedIds: $appState.selectedFiles,
-                            visibleFiles: files,
-                            onDoubleClick: {
-                                if file.isDirectory {
-                                    appState.navigateTo(path: file.fullPath)
-                                } else {
-                                    NSWorkspace.shared.open(file.url)
-                                }
-                            }
-                        )
+                        tableDragOverlay(for: file, visibleFiles: files)
                     }
                 }
             }
@@ -674,31 +679,43 @@ struct ContentView: View {
 
             TableColumn(locale.resolution) { file in
                 ResolutionTableCell(file: file)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay { tableDragOverlay(for: file, visibleFiles: files) }
             }.width(min: 80, ideal: 95)
 
             TableColumn(locale.duration) { file in
                 DurationTableCell(file: file)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay { tableDragOverlay(for: file, visibleFiles: files) }
             }.width(min: 55, ideal: 70)
 
             TableColumn(locale.tableSize, value: \.size) { file in
                 Text(file.sizeFormatted)
                     .font(.system(size: 12)).foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .overlay { tableDragOverlay(for: file, visibleFiles: files) }
             }.width(min: 75, ideal: 90)
 
             TableColumn(locale.tableModDate, value: \.modDate) { file in
                 Text(file.modDateFormatted)
                     .font(.system(size: 12)).foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay { tableDragOverlay(for: file, visibleFiles: files) }
             }.width(min: 110, ideal: 130)
 
             TableColumn(locale.tableCreationDate, value: \.creationDate) { file in
                 Text(file.creationDateFormatted)
                     .font(.system(size: 12)).foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay { tableDragOverlay(for: file, visibleFiles: files) }
             }.width(min: 110, ideal: 130)
 
             TableColumn(locale.tablePath) { file in
                 Text(file.fullPath)
                     .font(.system(size: 11)).foregroundColor(.secondary)
                     .lineLimit(1).truncationMode(.head)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay { tableDragOverlay(for: file, visibleFiles: files) }
             }.width(ideal: 300)
         }
         .onChange(of: sortOrder) { _, newValue in

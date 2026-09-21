@@ -39,6 +39,7 @@ final class FileDragSourceView: NSView, NSDraggingSource {
     var onSelection: (() -> Void)? = nil
 
     static var lastClickedKey: Int64? = nil
+    static var isCardMouseDown: Bool = false
 
     private var mouseDownLocation: NSPoint?
     private var isDragging = false
@@ -52,6 +53,12 @@ final class FileDragSourceView: NSView, NSDraggingSource {
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         wantsLayer = true
+    }
+
+    deinit {
+        if FileDragSourceView.isCardMouseDown {
+            FileDragSourceView.isCardMouseDown = false
+        }
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -71,6 +78,8 @@ final class FileDragSourceView: NSView, NSDraggingSource {
             return
         }
 
+        FileDragSourceView.isCardMouseDown = true
+
         // Resign search field focus so keyboard shortcuts (Space, Delete, etc.) target file selection
         window?.makeFirstResponder(nil)
 
@@ -83,8 +92,10 @@ final class FileDragSourceView: NSView, NSDraggingSource {
 
         if modifiers.contains(.command) {
             // Cmd-click: Toggle item selection
-            if selectedIds.wrappedValue.contains(fileKey) {
+            if selectedIds.wrappedValue.contains(fileKey) || selectedIds.wrappedValue.contains(file.id) || selectedIds.wrappedValue.contains(file.stableId) {
                 selectedIds.wrappedValue.remove(fileKey)
+                selectedIds.wrappedValue.remove(file.id)
+                selectedIds.wrappedValue.remove(file.stableId)
             } else {
                 selectedIds.wrappedValue.insert(fileKey)
             }
@@ -106,7 +117,10 @@ final class FileDragSourceView: NSView, NSDraggingSource {
             onSelection?()
         } else {
             // Normal click without modifiers
-            if selectedIds.wrappedValue.contains(fileKey) {
+            let isAlreadySelected = selectedIds.wrappedValue.contains(fileKey) ||
+                                    selectedIds.wrappedValue.contains(file.id) ||
+                                    selectedIds.wrappedValue.contains(file.stableId)
+            if isAlreadySelected {
                 // Already part of selection. Delay collapsing until mouseUp so we can drag the multi-selection.
                 shouldSelectOnMouseUp = selectedIds.wrappedValue.count > 1
             } else {
@@ -138,6 +152,7 @@ final class FileDragSourceView: NSView, NSDraggingSource {
 
     override func mouseUp(with event: NSEvent) {
         defer {
+            FileDragSourceView.isCardMouseDown = false
             mouseDownLocation = nil
             isDragging = false
             shouldSelectOnMouseUp = false
@@ -162,18 +177,25 @@ final class FileDragSourceView: NSView, NSDraggingSource {
         let fileKey = file.id != 0 ? file.id : file.stableId
         let currentSelected = selectedIds.wrappedValue
 
+        let isAlreadySelected = currentSelected.contains(fileKey) ||
+                                currentSelected.contains(file.id) ||
+                                currentSelected.contains(file.stableId)
+
         let filesToDrag: [IndexedFile]
-        if currentSelected.contains(fileKey) {
-            filesToDrag = visibleFiles.filter { currentSelected.contains($0.id != 0 ? $0.id : $0.stableId) }
+        if isAlreadySelected {
+            let matched = visibleFiles.filter {
+                currentSelected.contains($0.id) ||
+                currentSelected.contains($0.stableId) ||
+                currentSelected.contains($0.id != 0 ? $0.id : $0.stableId)
+            }
+            filesToDrag = matched.isEmpty ? [file] : matched
         } else {
             filesToDrag = [file]
             selectedIds.wrappedValue = [fileKey]
             FileDragSourceView.lastClickedKey = fileKey
         }
 
-        let urls = filesToDrag
-            .filter { FileManager.default.fileExists(atPath: $0.fullPath) }
-            .map { URL(fileURLWithPath: $0.fullPath) }
+        let urls = filesToDrag.map { URL(fileURLWithPath: $0.fullPath) }
         guard !urls.isEmpty else { return }
 
         let dragPoint = convert(event.locationInWindow, from: nil)
@@ -216,5 +238,10 @@ final class FileDragSourceView: NSView, NSDraggingSource {
 
     func ignoreModifierKeys(for session: NSDraggingSession) -> Bool {
         false
+    }
+
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        FileDragSourceView.isCardMouseDown = false
+        isDragging = false
     }
 }

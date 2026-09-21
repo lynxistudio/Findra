@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-21
+- Fixed multi-file dragging in both Grid and Table views: resolved an issue where starting a drag on an already-selected card in Grid View triggered the canvas marquee rubber-band gesture, which immediately collapsed multi-selection down to a single item and blocked dragging out to external apps (Finder, WeChat, Photoshop, Desktop, etc.).
+- Strengthened drag isolation: marquee box selection now strictly requires initiating a drag on empty background canvas, while dragging any file card (or table row across any column) reliably activates `NSDraggingSession` for all currently selected files without freezing or dropping network paths.
+
 ## 2026-09-20
 - Fixed text pasting (`Cmd+V`), copying (`Cmd+C`), cutting (`Cmd+X`), and selecting all (`Cmd+A`) in all input fields: resolved an issue where global file browser key monitor intercepted `Cmd+V` (attempting to paste files instead of text) whenever typing in the search bar or sheets. Input fields now seamlessly accept pasted text, URLs, and paths from the clipboard.
 - Added global `Cmd+A` shortcut to select all visible files when browsing the file list/grid.
