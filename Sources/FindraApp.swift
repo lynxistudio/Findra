@@ -164,8 +164,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showWindow()
+        return false
+    }
+
     @objc private func toggleWindow() {
-        if let window = window, window.isVisible {
+        if let window = window, window.isVisible, NSApp.isActive {
             window.orderOut(nil)
         } else {
             showWindow()
@@ -173,43 +178,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func showWindow() {
-        guard let appState, let localeManager else { return }
-
-        if window == nil {
-            adoptExistingWindowIfAvailable()
-        }
-
-        if window == nil {
-            let contentView = NSHostingView(
-                rootView: ContentView()
-                    .environmentObject(appState)
-                    .environmentObject(localeManager)
-            )
-            window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-                backing: .buffered,
-                defer: false
-            )
-            window?.title = "Findra"
-            window?.contentView = contentView
-            window?.center()
-            if let window {
-                adoptMainWindow(window)
+        // Close any extraneous duplicate windows if they exist
+        for w in NSApp.windows where !(w is NSPanel) {
+            if let main = self.window, w !== main {
+                w.close()
             }
         }
-        window?.makeKeyAndOrderFront(nil)
+
+        if let window = window {
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+            }
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        adoptExistingWindowIfAvailable()
+
+        if let window = window {
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+            }
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        guard let appState, let localeManager else { return }
+
+        let contentView = NSHostingView(
+            rootView: ContentView()
+                .environmentObject(appState)
+                .environmentObject(localeManager)
+        )
+        let newWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        newWindow.title = "Findra"
+        newWindow.contentView = contentView
+        newWindow.center()
+        adoptMainWindow(newWindow)
+        newWindow.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
     private func adoptExistingWindowIfAvailable() {
-        if let window = NSApp.windows.first(where: { $0.title == "Findra" && !($0 is NSPanel) }) {
+        if let window = NSApp.windows.first(where: { !($0 is NSPanel) }) {
             adoptMainWindow(window)
         }
     }
 
     private func adoptMainWindow(_ window: NSWindow) {
-        guard self.window !== window else { return }
+        // Enforce strict single-window instance: if we already have an active main window,
+        // close any redundant secondary window immediately.
+        if let existing = self.window, existing !== window {
+            window.close()
+            if existing.isMiniaturized {
+                existing.deminiaturize(nil)
+            }
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
         self.window = window
         window.title = "Findra"
         window.identifier = NSUserInterfaceItemIdentifier("FindraMainWindow")

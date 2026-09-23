@@ -60,10 +60,6 @@ struct ContentView: View {
             installResultsKeyMonitor()
             DispatchQueue.main.async {
                 NSApp.activate(ignoringOtherApps: true)
-                if let window = NSApp.windows.first(where: { !($0 is NSPanel) }) {
-                    window.center()
-                    window.makeKeyAndOrderFront(nil)
-                }
             }
         }
         .onDisappear { removeResultsKeyMonitor() }

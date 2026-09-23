@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-09-23
+- Fixed duplicate window bug on Dock reopen: resolved an issue where clicking the Dock icon after closing the main window spawned two synchronized windows. Implemented `applicationShouldHandleReopen(_:hasVisibleWindows:)` in `AppDelegate` returning `false` to prevent SwiftUI from instantiating a new window, enforced strict single-window instance deduplication in `adoptMainWindow` and `showWindow`, and removed redundant `NSApp.windows.first?.makeKeyAndOrderFront(nil)` in `ContentView.onAppear`.
+
 ## 2026-09-21
 - Fixed multi-file dragging in both Grid and Table views: resolved an issue where starting a drag on an already-selected card in Grid View triggered the canvas marquee rubber-band gesture, which immediately collapsed multi-selection down to a single item and blocked dragging out to external apps (Finder, WeChat, Photoshop, Desktop, etc.).
 - Strengthened drag isolation: marquee box selection now strictly requires initiating a drag on empty background canvas, while dragging any file card (or table row across any column) reliably activates `NSDraggingSession` for all currently selected files without freezing or dropping network paths.
