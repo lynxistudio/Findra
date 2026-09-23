@@ -58,9 +58,6 @@ struct ContentView: View {
         .onAppear {
             isSearchFocused = false
             installResultsKeyMonitor()
-            DispatchQueue.main.async {
-                NSApp.activate(ignoringOtherApps: true)
-            }
         }
         .onDisappear { removeResultsKeyMonitor() }
         .onChange(of: appState.editingFileId) { _, newId in

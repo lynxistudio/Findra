@@ -134,15 +134,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private weak var localeManager: LocaleManager?
 
     private var hasBeenCentered = false
+    private var isFirstLaunchPresentationPending = true
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         setupMenuBar()
         setupGlobalHotkey()
-
-        DispatchQueue.main.async { [weak self] in
-            self?.showWindow()
-        }
     }
 
     private func setupMenuBar() {
@@ -172,8 +169,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidBecomeActive(_ notification: Notification) {
         // When Findra becomes active (e.g. from Dock, App Switcher, Spotlight),
-        // ensure its main window is visible on the desktop.
-        if window == nil || (window?.isVisible == false && window?.isMiniaturized == false) {
+        // ensure its main window is visible on the desktop if it was closed/hidden.
+        if let window = window, !window.isVisible, !window.isMiniaturized {
             showWindow()
         }
     }
@@ -192,67 +189,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func showWindow() {
-        // Close any extraneous duplicate windows if they exist
-        for w in NSApp.windows where !(w is NSPanel) {
-            if let main = self.window, w !== main {
-                w.close()
-            }
-        }
-
-        if let window = window {
-            if window.frame.size.width < 100 || window.frame.size.height < 100 {
-                window.setContentSize(NSSize(width: 1050, height: 700))
-            }
-            if window.isMiniaturized {
-                window.deminiaturize(nil)
-            }
-            window.makeKeyAndOrderFront(nil)
-            window.orderFrontRegardless()
-            NSApp.activate(ignoringOtherApps: true)
+        guard let window = self.window else {
+            isFirstLaunchPresentationPending = true
             return
         }
 
-        adoptExistingWindowIfAvailable()
-
-        if let window = window {
-            if window.frame.size.width < 100 || window.frame.size.height < 100 {
-                window.setContentSize(NSSize(width: 1050, height: 700))
-            }
-            if window.isMiniaturized {
-                window.deminiaturize(nil)
-            }
-            window.makeKeyAndOrderFront(nil)
-            window.orderFrontRegardless()
-            NSApp.activate(ignoringOtherApps: true)
-            return
+        if window.frame.size.width < 100 || window.frame.size.height < 100 {
+            window.setContentSize(NSSize(width: 1050, height: 700))
         }
-
-        // If window is still being constructed by SwiftUI, retry shortly
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            self?.showWindow()
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
         }
-    }
-
-    private func adoptExistingWindowIfAvailable() {
-        if let window = NSApp.windows.first(where: { !($0 is NSPanel) }) {
-            adoptMainWindow(window)
-        }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func adoptMainWindow(_ window: NSWindow) {
+        // Reject status bar windows or NSPanels
+        if String(describing: type(of: window)).contains("StatusBar") || window is NSPanel {
+            return
+        }
+
+        if self.window === window {
+            return
+        }
+
         // Enforce strict single-window instance: if we already have an active main window,
         // close any redundant secondary window immediately.
         if let existing = self.window, existing !== window {
             window.close()
-            if existing.frame.size.width < 100 || existing.frame.size.height < 100 {
-                existing.setContentSize(NSSize(width: 1050, height: 700))
-            }
-            if existing.isMiniaturized {
-                existing.deminiaturize(nil)
-            }
-            existing.makeKeyAndOrderFront(nil)
-            existing.orderFrontRegardless()
-            NSApp.activate(ignoringOtherApps: true)
             return
         }
 
@@ -263,16 +228,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.delegate = self
 
         if window.frame.size.width < 100 || window.frame.size.height < 100 {
-            window.setContentSize(NSSize(width: 1050, height: 700))
+            let initialRect = NSRect(x: 0, y: 0, width: 1050, height: 700)
+            window.setFrame(initialRect, display: true)
         }
 
         if !hasBeenCentered {
             window.center()
             hasBeenCentered = true
         }
-        window.makeKeyAndOrderFront(nil)
-        window.orderFrontRegardless()
-        NSApp.activate(ignoringOtherApps: true)
+
+        if isFirstLaunchPresentationPending {
+            isFirstLaunchPresentationPending = false
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -286,10 +255,16 @@ private struct WindowAccessor: NSViewRepresentable {
 
     final class AccessorView: NSView {
         var onResolve: ((NSWindow) -> Void)?
+        private weak var lastWindow: NSWindow?
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            if let window = self.window {
+            attachIfNeeded()
+        }
+
+        func attachIfNeeded() {
+            if let window = self.window, window !== lastWindow {
+                lastWindow = window
                 onResolve?(window)
             }
         }
@@ -299,18 +274,14 @@ private struct WindowAccessor: NSViewRepresentable {
         let view = AccessorView()
         view.onResolve = onResolve
         DispatchQueue.main.async {
-            if let window = view.window {
-                onResolve(window)
-            }
+            view.attachIfNeeded()
         }
         return view
     }
 
     func updateNSView(_ nsView: AccessorView, context: Context) {
         nsView.onResolve = onResolve
-        if let window = nsView.window {
-            onResolve(window)
-        }
+        nsView.attachIfNeeded()
     }
 }
 
@@ -327,7 +298,7 @@ struct FindraApp: App {
             ContentView()
                 .environmentObject(appState)
                 .environmentObject(localeManager)
-                .frame(minWidth: 900, idealWidth: 1050, minHeight: 600, idealHeight: 700)
+                .frame(minWidth: 900, idealWidth: 1050, maxWidth: .infinity, minHeight: 600, idealHeight: 700, maxHeight: .infinity)
                 .background(
                     WindowAccessor { window in
                         appDelegate.configure(appState: appState, localeManager: localeManager, window: window)
@@ -340,7 +311,6 @@ struct FindraApp: App {
         }
         .defaultSize(width: 1050, height: 700)
         .windowStyle(.titleBar)
-        .windowResizability(.contentSize)
         .commands {
             CommandGroup(replacing: .newItem) {}
         }
