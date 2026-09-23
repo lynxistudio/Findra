@@ -133,10 +133,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private weak var appState: AppState?
     private weak var localeManager: LocaleManager?
 
+    private var hasBeenCentered = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         setupMenuBar()
         setupGlobalHotkey()
+
+        DispatchQueue.main.async { [weak self] in
+            self?.showWindow()
+        }
     }
 
     private func setupMenuBar() {
@@ -164,6 +170,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // When Findra becomes active (e.g. from Dock, App Switcher, Spotlight),
+        // ensure its main window is visible on the desktop.
+        if window == nil || (window?.isVisible == false && window?.isMiniaturized == false) {
+            showWindow()
+        }
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showWindow()
         return false
@@ -186,10 +200,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         if let window = window {
+            if window.frame.size.width < 100 || window.frame.size.height < 100 {
+                window.setContentSize(NSSize(width: 1050, height: 700))
+            }
             if window.isMiniaturized {
                 window.deminiaturize(nil)
             }
             window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
             NSApp.activate(ignoringOtherApps: true)
             return
         }
@@ -197,33 +215,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         adoptExistingWindowIfAvailable()
 
         if let window = window {
+            if window.frame.size.width < 100 || window.frame.size.height < 100 {
+                window.setContentSize(NSSize(width: 1050, height: 700))
+            }
             if window.isMiniaturized {
                 window.deminiaturize(nil)
             }
             window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
-        guard let appState, let localeManager else { return }
-
-        let contentView = NSHostingView(
-            rootView: ContentView()
-                .environmentObject(appState)
-                .environmentObject(localeManager)
-        )
-        let newWindow = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-            backing: .buffered,
-            defer: false
-        )
-        newWindow.title = "Findra"
-        newWindow.contentView = contentView
-        newWindow.center()
-        adoptMainWindow(newWindow)
-        newWindow.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        // If window is still being constructed by SwiftUI, retry shortly
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.showWindow()
+        }
     }
 
     private func adoptExistingWindowIfAvailable() {
@@ -237,10 +244,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // close any redundant secondary window immediately.
         if let existing = self.window, existing !== window {
             window.close()
+            if existing.frame.size.width < 100 || existing.frame.size.height < 100 {
+                existing.setContentSize(NSSize(width: 1050, height: 700))
+            }
             if existing.isMiniaturized {
                 existing.deminiaturize(nil)
             }
             existing.makeKeyAndOrderFront(nil)
+            existing.orderFrontRegardless()
             NSApp.activate(ignoringOtherApps: true)
             return
         }
@@ -250,6 +261,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.identifier = NSUserInterfaceItemIdentifier("FindraMainWindow")
         window.isReleasedWhenClosed = false
         window.delegate = self
+
+        if window.frame.size.width < 100 || window.frame.size.height < 100 {
+            window.setContentSize(NSSize(width: 1050, height: 700))
+        }
+
+        if !hasBeenCentered {
+            window.center()
+            hasBeenCentered = true
+        }
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -261,8 +284,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 private struct WindowAccessor: NSViewRepresentable {
     let onResolve: (NSWindow) -> Void
 
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
+    final class AccessorView: NSView {
+        var onResolve: ((NSWindow) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let window = self.window {
+                onResolve?(window)
+            }
+        }
+    }
+
+    func makeNSView(context: Context) -> AccessorView {
+        let view = AccessorView()
+        view.onResolve = onResolve
         DispatchQueue.main.async {
             if let window = view.window {
                 onResolve(window)
@@ -271,11 +306,10 @@ private struct WindowAccessor: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            if let window = nsView.window {
-                onResolve(window)
-            }
+    func updateNSView(_ nsView: AccessorView, context: Context) {
+        nsView.onResolve = onResolve
+        if let window = nsView.window {
+            onResolve(window)
         }
     }
 }
@@ -293,7 +327,7 @@ struct FindraApp: App {
             ContentView()
                 .environmentObject(appState)
                 .environmentObject(localeManager)
-                .frame(minWidth: 900, minHeight: 600)
+                .frame(minWidth: 900, idealWidth: 1050, minHeight: 600, idealHeight: 700)
                 .background(
                     WindowAccessor { window in
                         appDelegate.configure(appState: appState, localeManager: localeManager, window: window)
@@ -304,6 +338,7 @@ struct FindraApp: App {
                     appState.initialize(locale: localeManager)
                 }
         }
+        .defaultSize(width: 1050, height: 700)
         .windowStyle(.titleBar)
         .windowResizability(.contentSize)
         .commands {
@@ -446,31 +481,59 @@ final class AppState: ObservableObject {
         self.locale = locale
         dbManager.setupDatabase()
         loadDirectories()
-        removeRedundantNestedDirectories()
-        loadDirectories()
         loadExcludedPatterns()
-        addDefaultExcludedPatterns()
-        updateStats()
-        refreshDirectoryIndexStats()
         setupSearch()
-        startScheduledScans()
-        startIncrementalScans()
-        startFSEventWatchers()
-        // Rebuild every configured root in the background after launch. Search remains database-only.
-        scanAllDirectories()
 
-        // Set initial browsing folder to the first indexed directory
+        // Set initial browsing folder to the first indexed directory immediately so UI renders without delay
         if currentDirectoryPath == nil, let firstDir = directories.first {
-            navigateTo(path: firstDir.path, recordHistory: false)
+            currentDirectoryPath = firstDir.path
+            loadCurrentDirectory()
+        }
+
+        // Heavy housekeeping (redundant directory cleanup, patterns, stats, watchers, and scanners)
+        // runs asynchronously in background so the main window pops up instantly.
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            self.removeRedundantNestedDirectories()
+            for pattern in ScanManager.defaultExcludedPatterns {
+                self.dbManager.addExcludedPattern(pattern)
+            }
+            let excluded = self.dbManager.getAllExcludedPatterns()
+            let stats = self.dbManager.getDirectoryIndexStats()
+            let totalCount = self.dbManager.getTotalFileCount()
+
+            DispatchQueue.main.async {
+                self.excludedPatterns = excluded
+                self.directoryIndexStats = stats
+                self.totalFileCount = totalCount
+                self.startScheduledScans()
+                self.startIncrementalScans()
+                self.startFSEventWatchers()
+                self.scanAllDirectories()
+            }
         }
     }
 
     func loadDirectories() {
-        directories = dbManager.getAllDirectories()
+        let dirs = dbManager.getAllDirectories()
+        if Thread.isMainThread {
+            directories = dirs
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.directories = dirs
+            }
+        }
     }
 
     func loadExcludedPatterns() {
-        excludedPatterns = dbManager.getAllExcludedPatterns()
+        let patterns = dbManager.getAllExcludedPatterns()
+        if Thread.isMainThread {
+            excludedPatterns = patterns
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.excludedPatterns = patterns
+            }
+        }
     }
 
     func addDefaultExcludedPatterns() {

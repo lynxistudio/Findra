@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-09-23
+- Fixed delayed window appearance and silent crash on launch: eliminated silent `NSInternalInconsistencyException` crash caused by modifying `@Published` properties on a background thread during initialization, guaranteed a minimum 1050x700 content size on first layout to avoid zero-sized (0x0) windows, and added instant frontmost activation (`orderFrontRegardless` + `NSApp.activate(ignoringOtherApps: true)`) so clicking the Dock icon or opening the app immediately pops the window to the front without multiple clicks.
 - Fixed duplicate window bug on Dock reopen: resolved an issue where clicking the Dock icon after closing the main window spawned two synchronized windows. Implemented `applicationShouldHandleReopen(_:hasVisibleWindows:)` in `AppDelegate` returning `false` to prevent SwiftUI from instantiating a new window, enforced strict single-window instance deduplication in `adoptMainWindow` and `showWindow`, and removed redundant `NSApp.windows.first?.makeKeyAndOrderFront(nil)` in `ContentView.onAppear`.
 
 ## 2026-09-21
