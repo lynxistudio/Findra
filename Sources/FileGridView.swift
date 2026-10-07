@@ -114,8 +114,13 @@ struct FileGridView: View {
                             }
                         }
                         .contextMenu {
-                            let currentSelection = selectedIds.isEmpty ? [fileKey] : selectedIds
+                            let currentSelection: Set<Int64> = selectedIds.contains(fileKey) ? selectedIds : [fileKey]
                             cardContextMenu(for: currentSelection)
+                                .onAppear {
+                                    if !selectedIds.contains(fileKey) {
+                                        selectedIds = [fileKey]
+                                    }
+                                }
                         }
                     }
                 }
@@ -235,8 +240,8 @@ struct FileGridView: View {
     }
 
     @ViewBuilder
-    private func cardContextMenu(for selectedIds: Set<Int64>) -> some View {
-        let selectedFiles = files.filter { selectedIds.contains($0.id) || selectedIds.contains($0.stableId) }
+    private func cardContextMenu(for targetIds: Set<Int64>) -> some View {
+        let selectedFiles = files.filter { targetIds.contains($0.id) || targetIds.contains($0.stableId) }
         let targetFiles = selectedFiles.isEmpty ? [] : selectedFiles
 
         if targetFiles.count == 1 {
@@ -249,8 +254,8 @@ struct FileGridView: View {
             }
             Divider()
             Button(locale.rename) { appState.startEditingFile(single) }
-            Button(locale.copy) { appState.copyFiles(selectedIds) }
-            Button(locale.cut) { appState.cutFiles(selectedIds) }
+            Button(locale.copy) { appState.copyFiles(targetIds) }
+            Button(locale.cut) { appState.cutFiles(targetIds) }
             Divider()
             Button(locale.copyPath) {
                 NSPasteboard.general.clearContents()
@@ -258,19 +263,19 @@ struct FileGridView: View {
             }
             Button(locale.showInFinder) { appState.revealInFinder(single) }
             Divider()
-            Button(locale.moveToTrash, role: .destructive) { appState.deleteFiles(selectedIds, immediately: false) }
-            Button(locale.deleteImmediately, role: .destructive) { appState.deleteFiles(selectedIds, immediately: true) }
+            Button(locale.moveToTrash, role: .destructive) { appState.deleteFiles(targetIds, immediately: false) }
+            Button(locale.deleteImmediately, role: .destructive) { appState.deleteFiles(targetIds, immediately: true) }
         } else if !targetFiles.isEmpty {
             Button(locale.quickLook) {
                 let urls = targetFiles.map { URL(fileURLWithPath: $0.fullPath) }
                 QuickLookCoordinator.shared.showPreview(urls: urls)
             }
             Divider()
-            Button(locale.copy) { appState.copyFiles(selectedIds) }
-            Button(locale.cut) { appState.cutFiles(selectedIds) }
+            Button(locale.copy) { appState.copyFiles(targetIds) }
+            Button(locale.cut) { appState.cutFiles(targetIds) }
             Divider()
-            Button(locale.moveToTrash, role: .destructive) { appState.deleteFiles(selectedIds, immediately: false) }
-            Button(locale.deleteImmediately, role: .destructive) { appState.deleteFiles(selectedIds, immediately: true) }
+            Button(locale.moveToTrash, role: .destructive) { appState.deleteFiles(targetIds, immediately: false) }
+            Button(locale.deleteImmediately, role: .destructive) { appState.deleteFiles(targetIds, immediately: true) }
         }
     }
 }

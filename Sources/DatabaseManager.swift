@@ -494,6 +494,18 @@ final class DatabaseManager {
         }
     }
 
+    func removeFileByPath(_ fullPath: String) {
+        let prefix = fullPath.hasSuffix("/") ? fullPath : fullPath + "/"
+        dbQueue.sync {
+            var stmt: OpaquePointer?
+            sqlite3_prepare_v2(db, "DELETE FROM files WHERE full_path = ? OR full_path LIKE ?", -1, &stmt, nil)
+            sqlite3_bind_text(stmt, 1, fullPath, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 2, "\(prefix)%", -1, SQLITE_TRANSIENT)
+            sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+        }
+    }
+
     func getTotalFileCount() -> Int {
         return dbQueue.sync {
             var stmt: OpaquePointer?

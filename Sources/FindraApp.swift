@@ -925,22 +925,49 @@ final class AppState: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             var successfulCount = 0
+            var lastErrorMessage: String?
             let fm = FileManager.default
 
             for file in files {
                 let url = URL(fileURLWithPath: file.fullPath)
                 do {
                     if immediately {
-                        try fm.removeItem(at: url)
+                        do {
+                            try fm.removeItem(at: url)
+                        } catch {
+                            // If permission issue, try resetting permissions and retrying
+                            try? fm.setAttributes([.posixPermissions: 0o777], ofItemAtPath: file.fullPath)
+                            try fm.removeItem(at: url)
+                        }
                     } else {
-                        try fm.trashItem(at: url, resultingItemURL: nil)
+                        do {
+                            try fm.trashItem(at: url, resultingItemURL: nil)
+                        } catch let trashError as NSError {
+                            // Remote network volumes (NFS, SMB) do not support macOS .Trashes (Cocoa 3328, 4, or OSStatus -120 dirNFErr / -43 fnfErr).
+                            // Fallback to permanent deletion matching Finder behavior.
+                            let isTrashUnsupported = (trashError.domain == NSCocoaErrorDomain && (trashError.code == 3328 || trashError.code == 4))
+                                || (trashError.domain == NSOSStatusErrorDomain && (trashError.code == -120 || trashError.code == -43))
+                                || url.path.hasPrefix("/Volumes/")
+                            if isTrashUnsupported {
+                                do {
+                                    try fm.removeItem(at: url)
+                                } catch {
+                                    try? fm.setAttributes([.posixPermissions: 0o777], ofItemAtPath: file.fullPath)
+                                    try fm.removeItem(at: url)
+                                }
+                            } else {
+                                throw trashError
+                            }
+                        }
                     }
                     if file.id != 0 {
                         self.dbManager.removeFileById(file.id)
                     }
+                    self.dbManager.removeFileByPath(file.fullPath)
                     successfulCount += 1
                 } catch {
                     print("Delete failed: \(file.fullPath) - \(error)")
+                    lastErrorMessage = error.localizedDescription
                 }
             }
 
@@ -950,10 +977,14 @@ final class AppState: ObservableObject {
             DispatchQueue.main.async {
                 self.totalFileCount = newTotal
                 self.directoryIndexStats = newStats
-                if immediately {
+                if successfulCount == 0 && !files.isEmpty {
+                    self.statusText = "Delete failed: \(lastErrorMessage ?? "Permission denied or volume busy")"
+                } else if successfulCount < files.count {
+                    self.statusText = "Deleted \(successfulCount)/\(files.count) items (\(lastErrorMessage ?? "some errors"))"
+                } else if immediately {
                     self.statusText = self.locale?.permanentlyDeletedFiles(successfulCount) ?? "Permanently deleted \(successfulCount) file(s)"
                 } else {
-                    self.statusText = self.locale?.deletedFiles(successfulCount) ?? "Moved \(successfulCount) item(s) to Trash"
+                    self.statusText = self.locale?.deletedFiles(successfulCount) ?? "Deleted \(successfulCount) item(s)"
                 }
                 // Refresh to sync any actual filesystem differences without overwriting status text
                 self.refreshCurrentDirectory(updateStatusText: false)
